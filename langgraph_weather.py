@@ -72,6 +72,38 @@ TOOL_SCHEMAS = [
 client = OpenAI(api_key=os.getenv("DEEPSEEK_API_KEY"), base_url="https://api.deepseek.com")
 SYSTEM = "你是天气助手。用户没说城市时必须追问，不许瞎猜。"
 
+def _to_openai(m):
+    """把 LangGraph 的 message 对象（或 dict）统一转成 OpenAI 格式的 dict。
+
+    add_messages 会把塞进 state 的 dict 转成 HumanMessage / AIMessage /
+    ToolMessage 对象，它们没有 `role` 字段，直接传给 OpenAI API 会报 422。
+    所以每次调 API、读 tool_calls、取最终回答前，都先过一遍这个函数。
+    """
+    if isinstance(m, dict):
+        return m
+    kind = type(m).__name__
+    content = m.content or ""
+    if kind == "HumanMessage":
+        return {"role": "user", "content": content}
+    if kind == "SystemMessage":
+        return {"role": "system", "content": content}
+    if kind == "ToolMessage":
+        return {"role": "tool", "tool_call_id": getattr(m, "tool_call_id", ""), "content": content}
+    if kind == "AIMessage":
+        d = {"role": "assistant", "content": content}
+        tcs = []
+        for tc in (getattr(m, "tool_calls", None) or []):
+            args = tc.get("args", {})
+            tcs.append({"id": tc.get("id", ""), "type": "function",
+                        "function": {"name": tc.get("name", ""),
+                                     "arguments": args if isinstance(args, str)
+                                     else json.dumps(args, ensure_ascii=False)}})
+        if tcs:
+            d["tool_calls"] = tcs
+        return d
+    return {"role": "user", "content": content}
+
+
 # ---------- 图：状态、节点、边 ----------
 class State(TypedDict):
     messages: Annotated[list, add_messages]  # 状态：对话消息列表，自动追加
@@ -81,7 +113,7 @@ def agent_node(state: State):
     """节点 agent：调模型做决策（原来 while 循环里的第一步）"""
     resp = client.chat.completions.create(
         model="deepseek-chat", temperature=0,
-        messages=[{"role": "system", "content": SYSTEM}] + state["messages"],
+        messages=[{"role": "system", "content": SYSTEM}] + [_to_openai(m) for m in state["messages"]],
         tools=TOOL_SCHEMAS)
     m = resp.choices[0].message
     tcs = [{"id": tc.id, "type": "function",
@@ -97,7 +129,7 @@ def agent_node(state: State):
 
 def tool_node(state: State):
     """节点 tools：执行工具调用（原来 while 循环里的第二、三步）"""
-    last = state["messages"][-1]
+    last = _to_openai(state["messages"][-1])
     out = []
     for tc in last["tool_calls"]:
         name, args = tc["function"]["name"], json.loads(tc["function"]["arguments"])
@@ -112,7 +144,7 @@ def tool_node(state: State):
 
 def route(state: State):
     """条件边：看 agent 的决策，有 tool_call 就去 tools，没有就结束"""
-    last = state["messages"][-1]
+    last = _to_openai(state["messages"][-1])
     return "tools" if last.get("tool_calls") else END
 
 
@@ -134,4 +166,5 @@ while True:
     if not q:
         break
     result = app.invoke({"messages": [{"role": "user", "content": q}]})
-    print("\n回答：", result["messages"][-1]["content"], "\n")
+    final = _to_openai(result["messages"][-1])
+    print("\n回答：", final["content"], "\n")
