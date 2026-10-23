@@ -4,6 +4,7 @@
 requests 还是别的实现 —— 它只认 MCP 协议。
 """
 import asyncio
+import os
 import sys
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -13,6 +14,8 @@ async def main():
     params = StdioServerParameters(
         command=sys.executable,  # 用当前这个 python，比写死 "python" 更稳
         args=["mcp_weather_server.py"],  # 和 Client 同一个目录
+        # mcp 2.x 的 stdio 只继承白名单环境变量，QWEATHER_KEY 必须显式传给 Server 子进程
+        env={"QWEATHER_KEY": os.getenv("QWEATHER_KEY", "")},
     )
     async with stdio_client(params) as (read, write):
         async with ClientSession(read, write) as session:
