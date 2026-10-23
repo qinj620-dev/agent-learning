@@ -11,11 +11,16 @@ from mcp.client.stdio import stdio_client
 
 
 async def main():
+    # mcp 2.x 的 stdio 只继承白名单环境变量，下面这些必须显式传给 Server 子进程
+    passthrough = {"QWEATHER_KEY": os.getenv("QWEATHER_KEY", "")}
+    for k in ("no_proxy", "NO_PROXY", "http_proxy", "https_proxy",
+              "HTTP_PROXY", "HTTPS_PROXY"):
+        if os.getenv(k):
+            passthrough[k] = os.environ[k]
     params = StdioServerParameters(
         command=sys.executable,  # 用当前这个 python，比写死 "python" 更稳
         args=["mcp_weather_server.py"],  # 和 Client 同一个目录
-        # mcp 2.x 的 stdio 只继承白名单环境变量，QWEATHER_KEY 必须显式传给 Server 子进程
-        env={"QWEATHER_KEY": os.getenv("QWEATHER_KEY", "")},
+        env=passthrough,
     )
     async with stdio_client(params) as (read, write):
         async with ClientSession(read, write) as session:
