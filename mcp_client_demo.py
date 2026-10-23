@@ -1,26 +1,20 @@
 """任务9：MCP Client —— 连上 Server，像调本地函数一样调远程工具
 
-注意体会：Client 侧完全不知道 get_weather 背后是和风 API、
+注意体会：Client 侧完全不知道 get_weather 背后是哪个天气 API、
 requests 还是别的实现 —— 它只认 MCP 协议。
 """
 import asyncio
-import os
 import sys
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 
 async def main():
-    # mcp 2.x 的 stdio 只继承白名单环境变量，下面这些必须显式传给 Server 子进程
-    passthrough = {"QWEATHER_KEY": os.getenv("QWEATHER_KEY", "")}
-    for k in ("no_proxy", "NO_PROXY", "http_proxy", "https_proxy",
-              "HTTP_PROXY", "HTTPS_PROXY"):
-        if os.getenv(k):
-            passthrough[k] = os.environ[k]
+    # 注：mcp 2.x 的 stdio 子进程只继承白名单环境变量，
+    # 如果 Server 需要 key/代理，得用 env={...} 显式传；本例 Server 免 key，不用传
     params = StdioServerParameters(
         command=sys.executable,  # 用当前这个 python，比写死 "python" 更稳
         args=["mcp_weather_server.py"],  # 和 Client 同一个目录
-        env=passthrough,
     )
     async with stdio_client(params) as (read, write):
         async with ClientSession(read, write) as session:
