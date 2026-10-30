@@ -23,23 +23,32 @@ _WEATHER_CN = {0: "晴", 1: "大致晴", 2: "多云", 3: "阴",
                95: "雷暴", 96: "雷暴伴冰雹", 99: "雷暴伴冰雹"}
 
 
+def _get(url, params):
+    """发 GET：先走默认配置，代理掐 TLS 握手时改直连重试。
+
+    背景：公司网代理会对某些域名掐 TLS 握手（SSLEOFError），
+    任务 1 就踩过这个坑，解法是绕过代理直连。
+    """
+    try:
+        return requests.get(url, params=params, timeout=15)
+    except (requests.exceptions.SSLError, requests.exceptions.ProxyError):
+        return requests.get(url, params=params, timeout=15,
+                            proxies={"http": None, "https": None})
+
+
 @mcp.tool()
 def get_weather(city: str) -> str:
     """查询指定城市的实时天气"""
-    g = requests.get(
-        "https://geocoding-api.open-meteo.com/v1/search",
-        params={"name": city, "count": 1, "language": "zh", "format": "json"},
-        timeout=15).json()
+    g = _get("https://geocoding-api.open-meteo.com/v1/search",
+             {"name": city, "count": 1, "language": "zh", "format": "json"}).json()
     if not g.get("results"):
         return f"找不到城市：{city}"
     r0 = g["results"][0]
-    w = requests.get(
-        "https://api.open-meteo.com/v1/forecast",
-        params={"latitude": r0["latitude"], "longitude": r0["longitude"],
-                "current": "temperature_2m,weather_code",
-                "daily": "temperature_2m_max,temperature_2m_min",
-                "timezone": "auto"},
-        timeout=15).json()
+    w = _get("https://api.open-meteo.com/v1/forecast",
+             {"latitude": r0["latitude"], "longitude": r0["longitude"],
+              "current": "temperature_2m,weather_code",
+              "daily": "temperature_2m_max,temperature_2m_min",
+              "timezone": "auto"}).json()
     cur, daily = w["current"], w["daily"]
     desc = _WEATHER_CN.get(cur["weather_code"], "未知")
     return (f"{r0.get('name', city)}当前 {cur['temperature_2m']}°C，{desc}，"
