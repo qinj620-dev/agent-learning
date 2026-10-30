@@ -83,20 +83,16 @@ _WEATHER_CN = {0: "晴", 1: "大致晴", 2: "多云", 3: "阴",
 
 
 def get_weather(city):
-    g = requests.get(
-        "https://geocoding-api.open-meteo.com/v1/search",
-        params={"name": city, "count": 1, "language": "zh", "format": "json"},
-        timeout=15).json()
+    g = _get("https://geocoding-api.open-meteo.com/v1/search",
+             {"name": city, "count": 1, "language": "zh", "format": "json"}).json()
     if not g.get("results"):
         return f"找不到城市：{city}"
     r0 = g["results"][0]
-    w = requests.get(
-        "https://api.open-meteo.com/v1/forecast",
-        params={"latitude": r0["latitude"], "longitude": r0["longitude"],
-                "current": "temperature_2m,weather_code",
-                "daily": "temperature_2m_max,temperature_2m_min",
-                "timezone": "auto"},
-        timeout=15).json()
+    w = _get("https://api.open-meteo.com/v1/forecast",
+             {"latitude": r0["latitude"], "longitude": r0["longitude"],
+              "current": "temperature_2m,weather_code",
+              "daily": "temperature_2m_max,temperature_2m_min",
+              "timezone": "auto"}).json()
     cur, daily = w["current"], w["daily"]
     desc = _WEATHER_CN.get(cur["weather_code"], "未知")
     return (f"{r0.get('name', city)}当前 {cur['temperature_2m']}°C，{desc}，"
@@ -111,17 +107,33 @@ def get_today():
 TOOLS_IMPL = {"get_weather": get_weather, "get_today": get_today}
 
 
+def _post(url, headers, payload):
+    """POST：先走默认配置，代理掐 TLS 握手时改直连重试（任务 1、任务 9 同款坑）"""
+    try:
+        return requests.post(url, headers=headers, json=payload, timeout=60)
+    except (requests.exceptions.SSLError, requests.exceptions.ProxyError):
+        return requests.post(url, headers=headers, json=payload, timeout=60,
+                             proxies={"http": None, "https": None})
+
+
+def _get(url, params):
+    """GET：同上，代理失败改直连重试"""
+    try:
+        return requests.get(url, params=params, timeout=15)
+    except (requests.exceptions.SSLError, requests.exceptions.ProxyError):
+        return requests.get(url, params=params, timeout=15,
+                            proxies={"http": None, "https": None})
+
+
 def call_llm(messages, tracer):
     """调一次模型，并记一笔账（优先用 API 返回的真实 usage）"""
     t0 = time.time()
     try:
-        r = requests.post(
-            "https://api.deepseek.com/chat/completions",
-            headers={"Authorization": f"Bearer {DEEPSEEK_KEY}",
-                     "Content-Type": "application/json"},
-            json={"model": MODEL, "messages": messages,
-                  "tools": TOOLS, "tool_choice": "auto"},
-            timeout=60).json()
+        r = _post("https://api.deepseek.com/chat/completions",
+                  {"Authorization": f"Bearer {DEEPSEEK_KEY}",
+                   "Content-Type": "application/json"},
+                  {"model": MODEL, "messages": messages,
+                   "tools": TOOLS, "tool_choice": "auto"}).json()
         msg = r["choices"][0]["message"]
         usage = r.get("usage", {})
         in_tok = usage.get("prompt_tokens") or est_tokens(
