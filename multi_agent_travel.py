@@ -134,9 +134,13 @@ def build_graph():
 
 
 if __name__ == "__main__":
+    import re
     app = build_graph()
     city = input("去哪个城市：").strip() or "北京"
-    days = input("玩几天：").strip() or "3"
-    result = app.invoke({"city": city, "days": int(days)})
+    days_raw = input("玩几天：").strip() or "3"
+    # 容忍 "3天" 这种输入，只取里面的数字
+    m = re.search(r"\d+", days_raw)
+    days = int(m.group()) if m else 3
+    result = app.invoke({"city": city, "days": days})
     print("\n===== 最终行程 =====")
     print(result["plan"])
