@@ -8,7 +8,11 @@
   - share=True 还会给一个公开链接（gradio.live），别人不用装任何东西就能用；
     注意：公开链接是临时的，电脑关机或程序退出就没了；
     想长期公开，下一步可以部署到 Hugging Face Spaces。
+部署到 Render 等平台时：平台会设 PORT 环境变量，程序自动绑 0.0.0.0:$PORT
+且不开 share（平台自己给固定链接）；本地没 PORT 时保持上面的默认行为。
 """
+import os
+
 import gradio as gr
 
 import kb_assistant as kb
@@ -60,6 +64,18 @@ def build_demo():
     return demo
 
 
+def launch_kwargs():
+    """按运行环境决定启动参数。
+
+    平台上（PORT 已设，如 Render）：绑 0.0.0.0:$PORT，不开 share（平台给固定链接）。
+    本地（PORT 未设）：默认本机地址 + share=True 给临时公开链接。
+    """
+    port = os.environ.get("PORT")
+    if port:
+        return {"server_name": "0.0.0.0", "server_port": int(port), "share": False}
+    return {"share": True}
+
+
 if __name__ == "__main__":
     demo = build_demo()
-    demo.launch(share=True)
+    demo.launch(**launch_kwargs())
