@@ -1,6 +1,6 @@
 """毕业项目 eval：6 道题，测 RAG 的两条底线（任务 4 的规则评分）
   库内问题：必须答对关键点，不能说不知道
-  库外问题：必须说不知道，不能瞎编
+  库外问题：必须注明不是知识库内容（两档模式，不再要求说不知道）
 """
 import kb_assistant as kb
 
@@ -26,7 +26,7 @@ def run_eval():
         if kind == "in":
             ok = keyword in ans and "不知道" not in ans
         else:
-            ok = "不知道" in ans or "没有相关内容" in ans
+            ok = "大模型自己的回答" in ans
         passed += ok
         print(f"{'通过' if ok else '失败'} [{kind}] {question} -> {ans[:50]}...")
     print(f"\n通过率：{passed}/{len(TESTS)}")

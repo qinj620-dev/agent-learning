@@ -1,7 +1,8 @@
 """毕业项目：个人知识库助手 —— RAG + 记忆 + LangGraph + 可观测
 
 拼装前面学过的东西：
-  RAG（任务 7）：知识库检索，答案必须来自原文，答不上就说不知道
+  RAG（任务 7）：知识库检索，库内问题按原文回答；库外问题改用大模型自己的
+  知识回答，但必须注明不是知识库内容（两档模式，不再一律说不知道）
   记忆（任务 2）：对话超长时摘要压缩，不丢上下文
   LangGraph（任务 8）：检索 → 回答画成图
   可观测（任务 10）：每轮打印检索分数
@@ -75,7 +76,12 @@ def retrieve_node(state: State):
 def answer_node(state: State):
     hits = state["retrieved"]
     if not hits or hits[0][1] < SIM_THRESHOLD:
-        return {"answer": "知识库里没有相关内容，我不知道。"}
+        # 库外兜底：不说不知道，改用大模型自己的知识回答，
+        # 但必须注明不是知识库内容，让使用者分清来源
+        ans = ask_llm(
+            "你是一个通用问答助手，请直接回答用户的问题。",
+            f"问题：{state['question']}")
+        return {"answer": "知识库里没有相关内容，以下是大模型自己的回答，仅供参考：\n" + ans}
     context = "\n\n".join(c for c, _ in hits)
     ans = ask_llm(
         "你是知识库助手。只根据下面资料回答，答不上就说不知道，不要瞎编。",
