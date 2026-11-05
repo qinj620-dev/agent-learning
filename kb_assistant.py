@@ -11,8 +11,11 @@
 知识库就是任务 7 那份 knowledge_base.md（10 篇踩坑文档），
 和本文件放同一个目录。
 """
+import math
 import os
+import re
 import requests
+from collections import Counter
 from typing import TypedDict
 from langgraph.graph import StateGraph, START, END
 
@@ -20,7 +23,7 @@ DEEPSEEK_KEY = os.getenv("DEEPSEEK_API_KEY")
 MODEL = "deepseek-chat"
 API = "https://api.deepseek.com/chat/completions"
 KB_PATH = "knowledge_base.md"
-SIM_THRESHOLD = 0.5  # 任务 7 的教训：库外问题最高分才 0.257，低于阈值就说不知道
+SIM_THRESHOLD = 0.1  # TF-IDF 余弦分数：实测库内 0.18–0.31、库外 0.0–0.03，取中间值
 
 RETRIEVER = None  # main() 里初始化，节点通过它查库
 
@@ -40,28 +43,63 @@ def ask_llm(system, user):
     return r.json()["choices"][0]["message"]["content"]
 
 
+def _tokens(text):
+    """分词：英文/数字按词切（pip、SSL 这类词要完整保留），
+    中文按字二元组（"报错""推送"这类词不用 jieba 也能对上）。
+    不用任何模型或分词库，16 篇小知识库够用。"""
+    text = text.lower()
+    words = re.findall(r"[a-z0-9]+(?:[._-][a-z0-9]+)*", text)
+    chars = re.sub(r"\s+", "", text)
+    grams = [chars[i:i + 2] for i in range(len(chars) - 1)]
+    return words + grams
+
+
 class Retriever:
-    """知识库检索：按 ## 切块 → 向量化 → 查 top-2（任务 7 的做法）"""
+    """知识库检索：按 ## 切块 → 纯 Python TF-IDF → 查 top-2。
+
+    不用 torch/embedding 模型：Render 免费版只有 512MB 内存，
+    sentence-transformers 一加载就 OOM（2026-11-05 实测，
+    Events 明确写着 Ran out of memory used over 512MB）。
+    16 篇小知识库，关键词 TF-IDF 足够分清库内/库外。
+    """
 
     def __init__(self, path):
-        from sentence_transformers import SentenceTransformer
         text = open(path, encoding="utf-8").read()
         self.chunks = [p.strip() for p in text.split("## ") if p.strip()]
-        # 优先读代码旁边的 models/ 文件夹（构建时预下载的模型）；
-        # 本地没有就走原来的 Hub 名字（自动下载到缓存）
-        local_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                 "models", "bge-small-zh-v1.5")
-        model_id = local_dir if os.path.isdir(local_dir) else "BAAI/bge-small-zh-v1.5"
-        self.model = SentenceTransformer(model_id)
-        self.embs = self.model.encode(self.chunks, normalize_embeddings=True)
+        n = len(self.chunks)
+        df = Counter()
+        tf_list = []
+        for c in self.chunks:
+            cnt = Counter(_tokens(c))
+            tf_list.append(cnt)
+            df.update(cnt.keys())
+        self._idf = {t: math.log((n + 1) / (d + 1)) + 1
+                     for t, d in df.items()}
+        self._default_idf = math.log(n + 1) + 1
+        # 每篇预先算好归一化 TF-IDF 向量（dict 形式，省内存）
+        self._vecs = []
+        for cnt in tf_list:
+            vec = {t: (1 + math.log(v)) * self._idf[t]
+                   for t, v in cnt.items()}
+            norm = math.sqrt(sum(x * x for x in vec.values())) or 1.0
+            self._vecs.append({t: x / norm for t, x in vec.items()})
         print(f"知识库加载：{len(self.chunks)} 篇")
 
+    def _query_vec(self, query):
+        cnt = Counter(_tokens(query))
+        vec = {t: (1 + math.log(v)) * self._idf.get(t, self._default_idf)
+               for t, v in cnt.items()}
+        norm = math.sqrt(sum(x * x for x in vec.values())) or 1.0
+        return {t: x / norm for t, x in vec.items()}
+
     def search(self, query, top_k=2):
-        import numpy as np
-        q = self.model.encode([query], normalize_embeddings=True)[0]
-        scores = self.embs @ q
-        idx = np.argsort(-scores)[:top_k]
-        return [(self.chunks[i], float(scores[i])) for i in idx]
+        q = self._query_vec(query)
+        scored = []
+        for i, vec in enumerate(self._vecs):
+            s = sum(qv * vec.get(t, 0.0) for t, qv in q.items())
+            scored.append((s, i))
+        scored.sort(reverse=True)
+        return [(self.chunks[i], float(s)) for s, i in scored[:top_k]]
 
 
 class State(TypedDict):
