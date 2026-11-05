@@ -1,0 +1,5 @@
+gradio
+langgraph
+sentence-transformers
+requests
+numpy
