@@ -47,7 +47,12 @@ class Retriever:
         from sentence_transformers import SentenceTransformer
         text = open(path, encoding="utf-8").read()
         self.chunks = [p.strip() for p in text.split("## ") if p.strip()]
-        self.model = SentenceTransformer("shibing624/text2vec-base-chinese")
+        # 优先读代码旁边的 models/ 文件夹（构建时预下载的模型）；
+        # 本地没有就走原来的 Hub 名字（自动下载到缓存）
+        local_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                 "models", "text2vec-base-chinese")
+        model_id = local_dir if os.path.isdir(local_dir) else "shibing624/text2vec-base-chinese"
+        self.model = SentenceTransformer(model_id)
         self.embs = self.model.encode(self.chunks, normalize_embeddings=True)
         print(f"知识库加载：{len(self.chunks)} 篇")
 
