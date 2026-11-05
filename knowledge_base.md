@@ -55,3 +55,31 @@
 ## commit 信息怎么写
 
 格式：一句话说清这次干了什么，比如“任务六：Embedding 初体验”。push 前先 `git status` 看一眼文件清单，确认没有多余文件，更不能有 key。
+
+## Gradio share 链接建不起来（frpc 缺失）
+
+现象：跑 `demo.launch(share=True)` 时本机地址正常，但建不了公开链接，报错 `Could not create share link. Missing file: ...\gradio\frpc\frpc_windows_amd64_v0.3`。
+原因：公开链接要靠 frpc 这个隧道工具，Gradio 首次运行时自动下载它；当前网络下不下来，文件夹一直是空的。
+解法（按顺序试）：
+1. 浏览器手动下载 https://cdn-media.huggingface.co/frpc-gradio-0.3/frpc_windows_amd64.exe，改名成 `frpc_windows_amd64_v0.3`，移进 `C:\Users\<你>\.cache\huggingface\gradio\frpc`。
+2. Windows 启动程序时名字没后缀会自动补 `.exe` 去找，所以文件夹里还要再复制一份 `frpc_windows_amd64_v0.3.exe`。
+3. 注意：资源管理器改名时中文输入法可能混进全角字符，看着对、程序找不到；改名后用 `dir` 核对，找不到就用 `cmd /c "ren frpc* frpc_windows_amd64_v0.3"` 通配符改名。
+4. 改完重启程序，公开链接就出来了。
+
+## 网页版首次提问卡住（模型加载联网校验）
+
+现象：Gradio 网页版第一次提问时一直 processing，几分钟都不出回答；终端里反复出现 `Retrying in 8s` 和 `WinError 10060`，请求的是 huggingface.co 的 HEAD。
+原因：sentence-transformers 加载模型时默认先联网问一下 Hub（HEAD 校验），当前网络连不上 huggingface.co，就一次次超时重试；模型其实已经在本地缓存里了。
+解法：启动前设 `$env:HF_HUB_OFFLINE="1"`，让它只读本地缓存、不联网问，再跑程序。注意这个变量只对当前终端有效，新开终端要重设。
+
+## Hugging Face Spaces 的 Gradio 要付费
+
+现象：新建 Space 时 Gradio 和 Docker 档位标着 Paid，提示要 PRO 订阅；免费账号只能建 Static。
+原因：该账号下跑程序的 Space（Gradio/Docker）需要付费计划，免费的 Static 只能放静态网页，跑不了 Python 程序。
+解法：要么订阅 PRO 继续用 Spaces；要么换免费的 Render（永久链接，闲置休眠、访问唤醒），Render 上程序要绑平台给的 PORT 端口；要么先用 gradio.live 临时链接（每次重启都换）。
+
+## gradio.live 临时链接的规则
+
+现象：公开链接这次能用，下次打开却显示 `No interface is running right now`。
+原因：gradio.live 链接是临时的，每次启动程序都会换一个新链接；程序退出或电脑关机，隧道就没了，旧链接随即失效（官方说最长约 1 周）。
+解法：要提问就保持程序开着；程序关了就重跑一次，拿终端里给的新链接。想要固定不变的链接，得部署到 Render、Spaces 这类平台。
