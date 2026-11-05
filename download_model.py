@@ -16,9 +16,9 @@ os.environ.pop("HF_HUB_OFFLINE", None)
 
 from huggingface_hub import snapshot_download
 
-MODEL_NAME = "shibing624/text2vec-base-chinese"
+MODEL_NAME = "BAAI/bge-small-zh-v1.5"
 LOCAL_DIR = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "models", "text2vec-base-chinese"
+    os.path.dirname(os.path.abspath(__file__)), "models", "bge-small-zh-v1.5"
 )
 
 if __name__ == "__main__":
