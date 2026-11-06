@@ -89,8 +89,8 @@ def respond(message, chatbot, state):
 def build_demo():
     memory = load_memory()
     with gr.Blocks(title="个人知识库助手") as demo:
-        gr.Markdown("# 个人知识库助手\n问它踩坑类问题，答案来自知识库；"
-                    "知识库里没有的，会用大模型自己的知识回答并注明。")
+        gr.Markdown("# 个人知识库助手\n问它踩坑类问题，也可以问秦龙的经历、项目和技能；"
+                    "答案来自知识库，库里没有的会用大模型自己的知识回答并注明。")
         chatbot = gr.Chatbot(label="问答",
                              value=[{"role": m["role"], "content": m["content"]}
                                     for m in memory["history"]])
