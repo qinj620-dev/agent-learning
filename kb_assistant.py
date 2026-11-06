@@ -8,12 +8,17 @@
   可观测（任务 10）：每轮打印检索分数
   eval（任务 4）：见 eval_kb.py
 
-知识库就是任务 7 那份 knowledge_base.md（10 篇踩坑文档），
+知识库就是任务 7 那份 knowledge_base.md（16 篇踩坑文档），
 和本文件放同一个目录。
+长期记忆（2026-11-06 加）：对话历史 + 摘要存进代码旁边的
+SQLite（memory.db），启动时恢复，每轮结束写回；本地永久有效，
+Render 免费版休眠/重启会丢运行时文件，线上只在实例醒着时有效。
 """
 import math
 import os
 import re
+import sqlite3
+import threading
 import requests
 from collections import Counter
 from typing import TypedDict
@@ -26,6 +31,76 @@ KB_PATH = "knowledge_base.md"
 SIM_THRESHOLD = 0.1  # TF-IDF 余弦分数：实测库内 0.18–0.31、库外 0.0–0.03，取中间值
 
 RETRIEVER = None  # main() 里初始化，节点通过它查库
+
+DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "memory.db")
+
+
+class MemoryStore:
+    """长期记忆：对话历史 + 摘要，存进代码旁边的 SQLite（memory.db）。
+
+    为什么用 SQLite：标准库自带，不用装任何东西；一个文件就是全部记忆，
+    复制走就能带走；读写毫秒级，几十条对话才几十 KB。
+
+    用法：启动时 load() 恢复 (summary, history)，每轮问答结束 save() 写回。
+    本地跑：memory.db 一直在，记忆永久有效。
+    Render 免费版：实例休眠/重启会丢运行时文件（2026-11-05 实测：构建时
+    没进镜像的模型文件就是这么丢的），所以线上记忆只在实例醒着时有效，
+    睡一觉就没了——这是免费档的限制，不是 bug；要永久在线记忆得用云数据库。
+    """
+
+    def __init__(self, path=DB_PATH):
+        self.path = path
+        self._lock = threading.Lock()
+        self._broken = False
+        try:
+            with self._connect() as conn:
+                conn.execute(
+                    "CREATE TABLE IF NOT EXISTS meta"
+                    " (key TEXT PRIMARY KEY, value TEXT)")
+                conn.execute(
+                    "CREATE TABLE IF NOT EXISTS messages"
+                    " (id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                    "  role TEXT NOT NULL, content TEXT NOT NULL)")
+        except sqlite3.Error as e:
+            self._broken = True
+            print(f"  [记忆] 数据库打不开（{e}），本次只用内存记忆")
+
+    def _connect(self):
+        return sqlite3.connect(self.path, timeout=10)
+
+    def load(self):
+        """读库恢复：返回 (summary, history)，库不存在时返回 ("", [])。"""
+        if self._broken:
+            return "", []
+        try:
+            with self._lock, self._connect() as conn:
+                row = conn.execute(
+                    "SELECT value FROM meta WHERE key='summary'").fetchone()
+                summary = row[0] if row else ""
+                history = [{"role": r, "content": c} for r, c in conn.execute(
+                    "SELECT role, content FROM messages ORDER BY id")]
+            return summary, history
+        except sqlite3.Error as e:
+            print(f"  [记忆] 读库失败（{e}），按空记忆继续")
+            return "", []
+
+    def save(self, summary, history):
+        """整库写回：删掉旧消息，写入当前 history + summary。
+        history 很小（压缩后最多十来条），整存整取最简单可靠。"""
+        if self._broken:
+            return
+        try:
+            with self._lock, self._connect() as conn:
+                conn.execute("DELETE FROM messages")
+                conn.executemany(
+                    "INSERT INTO messages (role, content) VALUES (?, ?)",
+                    [(m["role"], m["content"]) for m in history])
+                conn.execute(
+                    "INSERT OR REPLACE INTO meta (key, value)"
+                    " VALUES ('summary', ?)",
+                    (summary,))
+        except sqlite3.Error as e:
+            print(f"  [记忆] 写库失败（{e}），本轮记忆没存上")
 
 
 def ask_llm(system, user):
@@ -153,8 +228,11 @@ def main():
     global RETRIEVER
     RETRIEVER = Retriever(KB_PATH)
     app = build_graph()
-    history = []   # 对话记忆：[{role, content}]
-    summary = ""
+    store = MemoryStore()
+    summary, history = store.load()
+    if history or summary:
+        print(f"  [记忆] 已恢复上次对话：{len(history)} 条"
+              + (f"，摘要：{summary[:60]}..." if summary else ""))
     while True:
         q = input("你问（回车退出）：").strip()
         if not q:
@@ -172,6 +250,7 @@ def main():
         print("\n回答：", result["answer"], "\n")
         history.append({"role": "user", "content": q})
         history.append({"role": "assistant", "content": result["answer"]})
+        store.save(summary, history)  # 每轮结束写库，下次启动接着聊
 
 
 if __name__ == "__main__":

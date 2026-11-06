@@ -10,14 +10,23 @@
     想长期公开，下一步可以部署到 Hugging Face Spaces。
 部署到 Render 等平台时：平台会设 PORT 环境变量，程序自动绑 0.0.0.0:$PORT
 且不开 share（平台自己给固定链接）；本地没 PORT 时保持上面的默认行为。
+
+长期记忆（2026-11-06 加）：对话历史 + 摘要存在代码旁边的 SQLite
+（memory.db），和命令行版共用一份记忆；启动时恢复，每轮问答结束写库。
+先做单用户全局记忆，简单可靠。本地永久有效；Render 免费版休眠/重启
+会丢运行时文件，线上记忆只在实例醒着时有效。
 """
 import os
+import threading
 
 import gradio as gr
 
 import kb_assistant as kb
 
 GRAPH = None
+_STORE = None
+_MEMORY = {"summary": "", "history": []}  # 单用户全局记忆
+_MEMORY_LOCK = threading.Lock()
 
 
 def get_graph():
@@ -28,38 +37,66 @@ def get_graph():
     return GRAPH
 
 
+def get_store():
+    """长期记忆的 SQLite 存取（和命令行版共用一份 memory.db）。"""
+    global _STORE
+    if _STORE is None:
+        _STORE = kb.MemoryStore()
+    return _STORE
+
+
+def load_memory():
+    """启动时读库恢复记忆（单用户全局）。"""
+    global _MEMORY
+    summary, history = get_store().load()
+    _MEMORY = {"summary": summary, "history": history}
+    if history or summary:
+        print(f"  [记忆] 已恢复上次对话：{len(history)} 条")
+    return _MEMORY
+
+
 def respond(message, chatbot, state):
-    """一次问答：state = {"summary": str, "history": [...]}"""
+    """一次问答：记忆走全局 _MEMORY（单用户），每轮结束写库。"""
     if not message.strip():
         return chatbot, state, ""
-    graph = get_graph()
-    history = state["history"]
-    summary = state["summary"]
-    # 记忆：超 10 条就把旧的摘要压缩，只留最近 4 条（和 kb_assistant.py 同款）
-    if len(history) > 10:
-        summary = kb.summarize_old(history[:-4])
-        history = history[-4:]
-    history_text = "\n".join(f"{m['role']}: {m['content']}"
-                             for m in history[-4:])
-    result = graph.invoke({"question": message, "summary": summary,
-                           "history_text": history_text,
-                           "retrieved": [], "answer": ""})
-    answer = result["answer"]
-    history.append({"role": "user", "content": message})
-    history.append({"role": "assistant", "content": answer})
-    chatbot = chatbot + [{"role": "user", "content": message},
-                         {"role": "assistant", "content": answer}]
-    state = {"summary": summary, "history": history}
-    return chatbot, state, ""
+    with _MEMORY_LOCK:  # 单用户串行处理，避免多请求同时改记忆
+        if _STORE is None:
+            load_memory()
+        graph = get_graph()
+        history = _MEMORY["history"]
+        summary = _MEMORY["summary"]
+        # 记忆：超 10 条就把旧的摘要压缩，只留最近 4 条（和 kb_assistant.py 同款）
+        if len(history) > 10:
+            summary = kb.summarize_old(history[:-4])
+            history = history[-4:]
+        history_text = "\n".join(f"{m['role']}: {m['content']}"
+                                 for m in history[-4:])
+        result = graph.invoke({"question": message, "summary": summary,
+                               "history_text": history_text,
+                               "retrieved": [], "answer": ""})
+        answer = result["answer"]
+        history.append({"role": "user", "content": message})
+        history.append({"role": "assistant", "content": answer})
+        _MEMORY["summary"] = summary
+        _MEMORY["history"] = history
+        get_store().save(summary, history)
+        chatbot = chatbot + [{"role": "user", "content": message},
+                             {"role": "assistant", "content": answer}]
+        state = {"summary": summary, "history": history}
+        return chatbot, state, ""
 
 
 def build_demo():
+    memory = load_memory()
     with gr.Blocks(title="个人知识库助手") as demo:
         gr.Markdown("# 个人知识库助手\n问它踩坑类问题，答案来自知识库；"
                     "知识库里没有的，会用大模型自己的知识回答并注明。")
-        chatbot = gr.Chatbot(label="问答")
+        chatbot = gr.Chatbot(label="问答",
+                             value=[{"role": m["role"], "content": m["content"]}
+                                    for m in memory["history"]])
         msg = gr.Textbox(label="你问", placeholder="比如：pip SSL 报错怎么办")
-        state = gr.State({"summary": "", "history": []})
+        state = gr.State({"summary": memory["summary"],
+                          "history": list(memory["history"])})
         msg.submit(respond, [msg, chatbot, state], [chatbot, state, msg])
     return demo
 
