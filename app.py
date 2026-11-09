@@ -98,12 +98,18 @@ body { background: #fafaf8; }
 .hero .tagline { font-size: 15px; color: #44403c; margin: 0 0 5px; line-height: 1.5; }
 .hero .tagline b { color: #0f766e; }
 .hero .intro { font-size: 13.5px; color: #78716c; margin: 0; line-height: 1.65; }
+.hero .note { font-size: 12.5px; color: #a8a29e; margin: 3px 0 0; line-height: 1.6; }
 
 /* 聊天卡片 */
 .chat-card { background: #ffffff; border: 1px solid #e7e5e4 !important; border-radius: 18px !important; box-shadow: 0 10px 32px rgba(28, 25, 23, 0.06); overflow: hidden; margin-bottom: 14px; }
 
+/* 提问行 */
+.ask-row { margin-bottom: 14px; gap: 10px; align-items: stretch; }
+.send-btn { background: #0f766e !important; color: #ffffff !important; border: none !important; border-radius: 14px !important; min-width: 76px; font-weight: 600; }
+
 /* 提问框 */
-.ask-box { margin-bottom: 14px; }
+.ask-box { background: #ffffff !important; }
+.ask-box > div { background: #ffffff !important; }
 .ask-box textarea { border-radius: 14px !important; border-color: #d6d3d1 !important; background: #ffffff !important; }
 
 /* 气泡（命中即生效，不命中也不影响） */
@@ -132,10 +138,13 @@ HERO_HTML = """
   <div>
     <h1>秦龙</h1>
     <p class="tagline"><b>Agent 工程师</b> · AI 应用方向 ｜ 上海康琼信息科技有限公司 销售经理</p>
-    <p class="intro">问它踩坑类问题，也可以问秦龙的经历、项目和技能；答案来自知识库，库里没有的会用大模型自己的知识回答并注明。</p>
+    <p class="intro">问它踩坑类问题，也可以问秦龙的经历、项目和技能。</p>
+    <p class="note">答案来自知识库；库里没有的，会用大模型自己的知识回答并注明。</p>
   </div>
 </div>
 """
+
+GREETING = "你好，我是秦龙的知识库助手。问我秦龙的经历、项目、技能，或者开发踩坑问题——也可以直接点下面的示例问题试试。"
 
 THEME = gr.themes.Soft(primary_hue="teal", neutral_hue="stone", radius_size="lg")
 
@@ -149,15 +158,20 @@ def build_demo():
     memory = load_memory()
     with gr.Blocks(title="秦龙 · 个人知识库助手") as demo:
         gr.HTML(HERO_HTML)
-        chatbot = gr.Chatbot(label=None, height=480,
+        initial = ([{"role": m["role"], "content": m["content"]}
+                    for m in memory["history"]] if memory["history"] else
+                   [{"role": "assistant", "content": GREETING}])
+        chatbot = gr.Chatbot(show_label=False, height=480,
                              elem_classes="chat-card",
-                             value=[{"role": m["role"], "content": m["content"]}
-                                    for m in memory["history"]])
-        msg = gr.Textbox(label=None, placeholder="比如：秦龙是谁？",
-                         elem_classes="ask-box")
+                             value=initial)
+        with gr.Row(elem_classes="ask-row"):
+            msg = gr.Textbox(show_label=False, placeholder="比如：秦龙是谁？",
+                             elem_classes="ask-box", scale=1)
+            send = gr.Button("发送", elem_classes="send-btn", scale=0)
         state = gr.State({"summary": memory["summary"],
                           "history": list(memory["history"])})
         msg.submit(respond, [msg, chatbot, state], [chatbot, state, msg])
+        send.click(respond, [msg, chatbot, state], [chatbot, state, msg])
         with gr.Column(elem_classes="examples-wrap"):
             gr.Examples(
                 examples=[["秦龙是谁？"], ["秦龙有什么证书？"], ["知识库助手项目用了什么技术？"],
