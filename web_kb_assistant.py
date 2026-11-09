@@ -11,10 +11,13 @@
 部署到 Render 等平台时：平台会设 PORT 环境变量，程序自动绑 0.0.0.0:$PORT
 且不开 share（平台自己给固定链接）；本地没 PORT 时保持上面的默认行为。
 
-长期记忆（2026-11-06 加）：对话历史 + 摘要存在代码旁边的 SQLite
-（memory.db），和命令行版共用一份记忆；启动时恢复，每轮问答结束写库。
-先做单用户全局记忆，简单可靠。本地永久有效；Render 免费版休眠/重启
-会丢运行时文件，线上记忆只在实例醒着时有效。
+记忆（2026-11-09 改为每会话独立）：每个访客的对话历史只存在自己
+浏览器的 gr.State 里，互不干扰、互不可见；关闭页面即消失，不再写
+入共用的 memory.db。命令行版 kb_assistant.py 仍用 SQLite 长期记忆，
+本地长期记忆不受影响。
+流式回答（2026-11-09 加）：respond 是生成器函数，边生成边把气泡
+内容推给前端，不用等整段答完。
+清空对话（2026-11-09 加）：点“清空对话”回到问候语，会话记忆清零。
 """
 import os
 import threading
@@ -24,66 +27,59 @@ import gradio as gr
 import kb_assistant as kb
 
 GRAPH = None
-_STORE = None
-_MEMORY = {"summary": "", "history": []}  # 单用户全局记忆
-_MEMORY_LOCK = threading.Lock()
+_GRAPH_LOCK = threading.Lock()
 
 
 def get_graph():
+    """建图并初始化检索器（只建一次，多会话共用，只读无冲突）。"""
     global GRAPH
     if GRAPH is None:
-        kb.RETRIEVER = kb.Retriever(kb.KB_PATH)
-        GRAPH = kb.build_graph()
+        with _GRAPH_LOCK:
+            if GRAPH is None:
+                kb.RETRIEVER = kb.Retriever(kb.KB_PATH)
+                GRAPH = kb.build_graph()
     return GRAPH
 
 
-def get_store():
-    """长期记忆的 SQLite 存取（和命令行版共用一份 memory.db）。"""
-    global _STORE
-    if _STORE is None:
-        _STORE = kb.MemoryStore()
-    return _STORE
-
-
-def load_memory():
-    """启动时读库恢复记忆（单用户全局）。"""
-    global _MEMORY
-    summary, history = get_store().load()
-    _MEMORY = {"summary": summary, "history": history}
-    if history or summary:
-        print(f"  [记忆] 已恢复上次对话：{len(history)} 条")
-    return _MEMORY
-
-
 def respond(message, chatbot, state):
-    """一次问答：记忆走全局 _MEMORY（单用户），每轮结束写库。"""
+    """一次问答（生成器）：记忆只走本会话的 state，答案流式吐出。
+
+    history 只在整段答案生成完后才追加，流式中途出错不留半截回答。
+    """
     if not message.strip():
-        return chatbot, state, ""
-    with _MEMORY_LOCK:  # 单用户串行处理，避免多请求同时改记忆
-        if _STORE is None:
-            load_memory()
-        graph = get_graph()
-        history = _MEMORY["history"]
-        summary = _MEMORY["summary"]
-        # 记忆：超 10 条就把旧的摘要压缩，只留最近 4 条（和 kb_assistant.py 同款）
-        if len(history) > 10:
-            summary = kb.summarize_old(history[:-4])
-            history = history[-4:]
-        history_text = "\n".join(f"{m['role']}: {m['content']}"
-                                 for m in history[-4:])
-        result = graph.invoke({"question": message, "summary": summary,
-                               "history_text": history_text,
-                               "retrieved": [], "answer": ""})
-        answer = result["answer"]
-        history.append({"role": "user", "content": message})
-        history.append({"role": "assistant", "content": answer})
-        _MEMORY["summary"] = summary
-        _MEMORY["history"] = history
-        get_store().save(summary, history)
-        chatbot = chatbot + [{"role": "user", "content": message},
-                             {"role": "assistant", "content": answer}]
-        state = {"summary": summary, "history": history}
-        return chatbot, state, ""
+        yield chatbot, state, ""
+        return
+    get_graph()
+    history = state["history"]
+    summary = state["summary"]
+    # 记忆：超 10 条就把旧的摘要压缩，只留最近 4 条（和 kb_assistant.py 同款）
+    if len(history) > 10:
+        summary = kb.summarize_old(history[:-4])
+        history = history[-4:]
+    history_text = "\n".join(f"{m['role']}: {m['content']}"
+                             for m in history[-4:])
+    hits = kb.RETRIEVER.search(message)
+    print(f"  [检索] top 分数：{[round(s, 3) for _, s in hits]}")
+    system, user_prompt, prefix = kb.build_answer_prompts(
+        message, summary, history_text, hits)
+    chatbot = chatbot + [{"role": "user", "content": message},
+                         {"role": "assistant", "content": prefix}]
+    yield chatbot, state, ""
+    full = prefix
+    for piece in kb.ask_llm_stream(system, user_prompt):
+        full += piece
+        chatbot[-1] = {"role": "assistant", "content": full}
+        yield chatbot, state, ""
+    history.append({"role": "user", "content": message})
+    history.append({"role": "assistant", "content": full})
+    state = {"summary": summary, "history": history}
+    yield chatbot, state, ""
+
+
+def clear_chat():
+    """清空对话：回到问候语，本会话记忆清零。"""
+    return [{"role": "assistant", "content": GREETING}], \
+        {"summary": "", "history": []}, ""
 
 
 THEME_CSS = """
@@ -106,6 +102,7 @@ body { background: #fafaf8; }
 /* 提问行 */
 .ask-row { margin-bottom: 14px; gap: 10px; align-items: stretch; }
 .send-btn { background: #0f766e !important; color: #ffffff !important; border: none !important; border-radius: 14px !important; min-width: 76px; font-weight: 600; }
+.clear-btn { background: #ffffff !important; color: #57534e !important; border: 1px solid #d6d3d1 !important; border-radius: 14px !important; min-width: 76px; font-weight: 600; }
 
 /* 提问框 */
 .ask-box { background: #ffffff !important; }
@@ -155,23 +152,21 @@ FOOTER_HTML = """
 """
 
 def build_demo():
-    memory = load_memory()
     with gr.Blocks(title="秦龙 · 个人知识库助手") as demo:
         gr.HTML(HERO_HTML)
-        initial = ([{"role": m["role"], "content": m["content"]}
-                    for m in memory["history"]] if memory["history"] else
-                   [{"role": "assistant", "content": GREETING}])
         chatbot = gr.Chatbot(show_label=False, height=480,
                              elem_classes="chat-card",
-                             value=initial)
+                             value=[{"role": "assistant", "content": GREETING}])
         with gr.Row(elem_classes="ask-row"):
             msg = gr.Textbox(show_label=False, placeholder="比如：秦龙是谁？",
                              elem_classes="ask-box", scale=1)
             send = gr.Button("发送", elem_classes="send-btn", scale=0)
-        state = gr.State({"summary": memory["summary"],
-                          "history": list(memory["history"])})
+            clear = gr.Button("清空对话", elem_classes="clear-btn", scale=0)
+        # 每会话独立记忆：gr.State 每个访客一份，互不干扰
+        state = gr.State({"summary": "", "history": []})
         msg.submit(respond, [msg, chatbot, state], [chatbot, state, msg])
         send.click(respond, [msg, chatbot, state], [chatbot, state, msg])
+        clear.click(clear_chat, [], [chatbot, state, msg])
         with gr.Column(elem_classes="examples-wrap"):
             gr.Examples(
                 examples=[["秦龙是谁？"], ["秦龙有什么证书？"], ["知识库助手项目用了什么技术？"],

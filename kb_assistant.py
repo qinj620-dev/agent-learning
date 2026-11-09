@@ -13,7 +13,10 @@
 长期记忆（2026-11-06 加）：对话历史 + 摘要存进代码旁边的
 SQLite（memory.db），启动时恢复，每轮结束写回；本地永久有效，
 Render 免费版休眠/重启会丢运行时文件，线上只在实例醒着时有效。
+流式回答（2026-11-09 加）：ask_llm_stream 供网页版边生成边显示，
+命令行版和 eval 仍走一次性 ask_llm，行为不变。
 """
+import json
 import math
 import os
 import re
@@ -118,6 +121,37 @@ def ask_llm(system, user):
     return r.json()["choices"][0]["message"]["content"]
 
 
+def ask_llm_stream(system, user):
+    """调 DeepSeek（流式）：逐片吐出正文，供网页版边生成边显示。
+
+    同 ask_llm 的代理重试逻辑；SSE 每行形如
+    data: {"choices": [{"delta": {"content": "..."}}]}，以 data: [DONE] 结束。
+    """
+    headers = {"Authorization": f"Bearer {DEEPSEEK_KEY}",
+               "Content-Type": "application/json"}
+    payload = {"model": MODEL, "stream": True,
+               "messages": [{"role": "system", "content": system},
+                            {"role": "user", "content": user}]}
+    try:
+        r = requests.post(API, headers=headers, json=payload, timeout=60,
+                          stream=True)
+    except (requests.exceptions.SSLError, requests.exceptions.ProxyError):
+        r = requests.post(API, headers=headers, json=payload, timeout=60,
+                          stream=True, proxies={"http": None, "https": None})
+    for line in r.iter_lines(decode_unicode=True):
+        if not line or not line.startswith("data:"):
+            continue
+        data = line[5:].strip()
+        if data == "[DONE]":
+            break
+        try:
+            piece = json.loads(data)["choices"][0]["delta"].get("content", "")
+        except (KeyError, IndexError, ValueError):
+            continue
+        if piece:
+            yield piece
+
+
 def _tokens(text):
     """分词：英文/数字按词切（pip、SSL 这类词要完整保留），
     中文按字二元组（"报错""推送"这类词不用 jieba 也能对上）。
@@ -191,21 +225,31 @@ def retrieve_node(state: State):
     return {"retrieved": hits}
 
 
-def answer_node(state: State):
-    hits = state["retrieved"]
+def build_answer_prompts(question, summary, history_text, retrieved):
+    """按检索结果拼回答用的提示词（一次性与流式共用）。
+
+    返回 (system, user, prefix)：prefix 是库外兜底时贴在答案前的注明，
+    库内命中时为空字符串。
+    """
+    hits = retrieved
     if not hits or hits[0][1] < SIM_THRESHOLD:
         # 库外兜底：不说不知道，改用大模型自己的知识回答，
         # 但必须注明不是知识库内容，让使用者分清来源
-        ans = ask_llm(
-            "你是一个通用问答助手，请直接回答用户的问题。",
-            f"问题：{state['question']}")
-        return {"answer": "知识库里没有相关内容，以下是大模型自己的回答，仅供参考：\n" + ans}
+        return ("你是一个通用问答助手，请直接回答用户的问题。",
+                f"问题：{question}",
+                "知识库里没有相关内容，以下是大模型自己的回答，仅供参考：\n")
     context = "\n\n".join(c for c, _ in hits)
-    ans = ask_llm(
-        "你是知识库助手。只根据下面资料回答，答不上就说不知道，不要瞎编。",
-        f"对话摘要：{state['summary']}\n最近对话：{state['history_text']}\n"
-        f"资料：\n{context}\n\n问题：{state['question']}")
-    return {"answer": ans}
+    return ("你是知识库助手。只根据下面资料回答，答不上就说不知道，不要瞎编。",
+            f"对话摘要：{summary}\n最近对话：{history_text}\n"
+            f"资料：\n{context}\n\n问题：{question}",
+            "")
+
+
+def answer_node(state: State):
+    system, user, prefix = build_answer_prompts(
+        state["question"], state["summary"], state["history_text"],
+        state["retrieved"])
+    return {"answer": prefix + ask_llm(system, user)}
 
 
 def build_graph():
