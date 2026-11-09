@@ -18,6 +18,12 @@
 流式回答（2026-11-09 加）：respond 是生成器函数，边生成边把气泡
 内容推给前端，不用等整段答完。
 清空对话（2026-11-09 加）：点“清空对话”回到问候语，会话记忆清零。
+答案出处（2026-11-09 加）：库内命中时答案末尾注明来源篇名，只显示
+不写入记忆，上下文里不带这行。
+示例直发（2026-11-09 加）：点示例问题直接提问，不用再按发送。
+等待与出错（2026-11-09 加）：出首字前气泡显示“思考中…”；模型
+连不上或没吐字时给友好提示，并把问题放回提问框，点发送就能重试，
+失败的那轮不进记忆。
 """
 import os
 import threading
@@ -28,6 +34,10 @@ import kb_assistant as kb
 
 GRAPH = None
 _GRAPH_LOCK = threading.Lock()
+
+THINKING = "思考中…"
+ERROR_TEXT = "抱歉，刚才没连上模型，可能是网络波动，问题已经放回提问框，再点一次发送试试。"
+EMPTY_TEXT = "这次没等到模型的回答，请再试一次。"
 
 
 def get_graph():
@@ -44,7 +54,8 @@ def get_graph():
 def respond(message, chatbot, state):
     """一次问答（生成器）：记忆只走本会话的 state，答案流式吐出。
 
-    history 只在整段答案生成完后才追加，流式中途出错不留半截回答。
+    history 只在整段答案生成完后才追加，流式中途出错不留半截回答；
+    出错时把问题放回提问框，点发送就能重试。
     """
     if not message.strip():
         yield chatbot, state, ""
@@ -52,24 +63,46 @@ def respond(message, chatbot, state):
     get_graph()
     history = state["history"]
     summary = state["summary"]
-    # 记忆：超 10 条就把旧的摘要压缩，只留最近 4 条（和 kb_assistant.py 同款）
+    # 记忆：超 10 条就把旧的摘要压缩，只留最近 4 条（和 kb_assistant.py 同款）；
+    # 摘要失败不影响本轮提问，沿用旧摘要继续
     if len(history) > 10:
-        summary = kb.summarize_old(history[:-4])
+        try:
+            summary = kb.summarize_old(history[:-4])
+        except Exception as e:
+            print(f"  [记忆] 摘要压缩失败（{e}），沿用旧摘要")
         history = history[-4:]
     history_text = "\n".join(f"{m['role']}: {m['content']}"
                              for m in history[-4:])
     hits = kb.RETRIEVER.search(message)
     print(f"  [检索] top 分数：{[round(s, 3) for _, s in hits]}")
-    system, user_prompt, prefix = kb.build_answer_prompts(
+    system, user_prompt, prefix, source = kb.build_answer_prompts(
         message, summary, history_text, hits)
     chatbot = chatbot + [{"role": "user", "content": message},
-                         {"role": "assistant", "content": prefix}]
+                         {"role": "assistant", "content": prefix + THINKING}]
     yield chatbot, state, ""
     full = prefix
-    for piece in kb.ask_llm_stream(system, user_prompt):
-        full += piece
-        chatbot[-1] = {"role": "assistant", "content": full}
-        yield chatbot, state, ""
+    started = False
+    try:
+        for piece in kb.ask_llm_stream(system, user_prompt):
+            if not started:
+                full = prefix + piece
+                started = True
+            else:
+                full += piece
+            chatbot[-1] = {"role": "assistant", "content": full}
+            yield chatbot, state, ""
+    except Exception as e:
+        print(f"  [回答] 流式调用失败（{e}）")
+        chatbot[-1] = {"role": "assistant", "content": ERROR_TEXT}
+        yield chatbot, state, message
+        return
+    if not started:
+        # 模型一个字都没吐：不记入历史，问题放回提问框
+        chatbot[-1] = {"role": "assistant", "content": EMPTY_TEXT}
+        yield chatbot, state, message
+        return
+    display = full + (f"\n\n---\n来源：{source}" if source else "")
+    chatbot[-1] = {"role": "assistant", "content": display}
     history.append({"role": "user", "content": message})
     history.append({"role": "assistant", "content": full})
     state = {"summary": summary, "history": history}
@@ -80,6 +113,17 @@ def clear_chat():
     """清空对话：回到问候语，本会话记忆清零。"""
     return [{"role": "assistant", "content": GREETING}], \
         {"summary": "", "history": []}, ""
+
+
+EXAMPLE_QUESTIONS = ["秦龙是谁？", "秦龙有什么证书？", "知识库助手项目用了什么技术？",
+                     "秦龙的项目经历有哪些？", "秦龙的工作经历是怎样的？", "pip 安装报错 SSL 怎么解决？"]
+
+
+def make_ask_example(question):
+    """示例按钮点即发送：把示例问题直接当作一次提问。"""
+    def _ask(chatbot, state):
+        yield from respond(question, chatbot, state)
+    return _ask
 
 
 THEME_CSS = """
@@ -113,9 +157,11 @@ body { background: #fafaf8; }
 .message.user { background: #ccfbf1 !important; }
 .message.bot { background: #f5f5f4 !important; }
 
-/* 示例问题：胶囊按钮 */
-.examples-wrap { border: none !important; background: transparent !important; box-shadow: none !important; padding: 0 !important; }
-.examples-wrap button { border-radius: 999px !important; border: 1px solid #d6d3d1 !important; background: #ffffff !important; color: #44403c !important; }
+/* 示例问题：胶囊按钮，点即发送 */
+.examples-label { font-size: 13px !important; color: #a8a29e !important; margin: 2px 0 8px !important; }
+.examples-label p { margin: 0 !important; }
+.examples-wrap { border: none !important; background: transparent !important; box-shadow: none !important; padding: 0 !important; display: flex !important; flex-direction: row !important; flex-wrap: wrap !important; gap: 8px !important; }
+.examples-wrap button { border-radius: 999px !important; border: 1px solid #d6d3d1 !important; background: #ffffff !important; color: #44403c !important; flex: 0 0 auto !important; }
 
 /* 页脚 */
 .footer { text-align: center; font-size: 12.5px; color: #a8a29e; padding: 4px 0 30px; line-height: 1.8; }
@@ -167,13 +213,12 @@ def build_demo():
         msg.submit(respond, [msg, chatbot, state], [chatbot, state, msg])
         send.click(respond, [msg, chatbot, state], [chatbot, state, msg])
         clear.click(clear_chat, [], [chatbot, state, msg])
+        gr.Markdown("试试这样问", elem_classes="examples-label")
         with gr.Column(elem_classes="examples-wrap"):
-            gr.Examples(
-                examples=[["秦龙是谁？"], ["秦龙有什么证书？"], ["知识库助手项目用了什么技术？"],
-                          ["秦龙的项目经历有哪些？"], ["秦龙的工作经历是怎样的？"], ["pip 安装报错 SSL 怎么解决？"]],
-                inputs=msg,
-                label="试试这样问",
-            )
+            for q in EXAMPLE_QUESTIONS:
+                btn = gr.Button(q, scale=0)
+                btn.click(make_ask_example(q), [chatbot, state],
+                          [chatbot, state, msg])
         gr.HTML(FOOTER_HTML)
     return demo
 

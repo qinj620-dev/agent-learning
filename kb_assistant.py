@@ -15,6 +15,8 @@ SQLite（memory.db），启动时恢复，每轮结束写回；本地永久有�
 Render 免费版休眠/重启会丢运行时文件，线上只在实例醒着时有效。
 流式回答（2026-11-09 加）：ask_llm_stream 供网页版边生成边显示，
 命令行版和 eval 仍走一次性 ask_llm，行为不变。
+答案出处（2026-11-09 加）：build_answer_prompts 顺带返回命中篇名，
+供网页版在答案后注明来源。
 """
 import json
 import math
@@ -225,11 +227,23 @@ def retrieve_node(state: State):
     return {"retrieved": hits}
 
 
+def chunk_title(chunk):
+    """取知识块的篇名：首行，去掉 # 号与空白。
+
+    切块按 "## " 切，篇名就是每块的首行；过长或取不到时返回空字符串，
+    调用方拿不到篇名就不显示来源。
+    """
+    first = chunk.strip().split("\n", 1)[0].strip().lstrip("#").strip()
+    if not first or len(first) > 25:
+        return ""
+    return first
+
+
 def build_answer_prompts(question, summary, history_text, retrieved):
     """按检索结果拼回答用的提示词（一次性与流式共用）。
 
-    返回 (system, user, prefix)：prefix 是库外兜底时贴在答案前的注明，
-    库内命中时为空字符串。
+    返回 (system, user, prefix, source)：prefix 是库外兜底时贴在答案前
+    的注明，库内命中时为空字符串；source 是命中篇的篇名，库外为空。
     """
     hits = retrieved
     if not hits or hits[0][1] < SIM_THRESHOLD:
@@ -237,16 +251,18 @@ def build_answer_prompts(question, summary, history_text, retrieved):
         # 但必须注明不是知识库内容，让使用者分清来源
         return ("你是一个通用问答助手，请直接回答用户的问题。",
                 f"问题：{question}",
-                "知识库里没有相关内容，以下是大模型自己的回答，仅供参考：\n")
+                "知识库里没有相关内容，以下是大模型自己的回答，仅供参考：\n",
+                "")
     context = "\n\n".join(c for c, _ in hits)
     return ("你是知识库助手。只根据下面资料回答，答不上就说不知道，不要瞎编。",
             f"对话摘要：{summary}\n最近对话：{history_text}\n"
             f"资料：\n{context}\n\n问题：{question}",
-            "")
+            "",
+            chunk_title(hits[0][0]))
 
 
 def answer_node(state: State):
-    system, user, prefix = build_answer_prompts(
+    system, user, prefix, _source = build_answer_prompts(
         state["question"], state["summary"], state["history_text"],
         state["retrieved"])
     return {"answer": prefix + ask_llm(system, user)}
