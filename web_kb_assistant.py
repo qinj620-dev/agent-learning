@@ -94,10 +94,16 @@ def build_demo():
         chatbot = gr.Chatbot(label="问答",
                              value=[{"role": m["role"], "content": m["content"]}
                                     for m in memory["history"]])
-        msg = gr.Textbox(label="你问", placeholder="比如：pip SSL 报错怎么办")
+        msg = gr.Textbox(label="你问", placeholder="比如：秦龙是谁？")
         state = gr.State({"summary": memory["summary"],
                           "history": list(memory["history"])})
         msg.submit(respond, [msg, chatbot, state], [chatbot, state, msg])
+        gr.Examples(
+            examples=[["秦龙是谁？"], ["秦龙有什么证书？"], ["知识库助手项目用了什么技术？"],
+                      ["秦龙的项目经历有哪些？"], ["秦龙的工作经历是怎样的？"], ["pip 安装报错 SSL 怎么解决？"]],
+            inputs=msg,
+            label="试试这样问",
+        )
     return demo
 
 

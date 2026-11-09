@@ -8,7 +8,7 @@
   可观测（任务 10）：每轮打印检索分数
   eval（任务 4）：见 eval_kb.py
 
-知识库就是任务 7 那份 knowledge_base.md（16 篇踩坑文档），
+知识库就是任务 7 那份 knowledge_base.md（19 篇知识库文档），
 和本文件放同一个目录。
 长期记忆（2026-11-06 加）：对话历史 + 摘要存进代码旁边的
 SQLite（memory.db），启动时恢复，每轮结束写回；本地永久有效，
@@ -135,7 +135,7 @@ class Retriever:
     不用 torch/embedding 模型：Render 免费版只有 512MB 内存，
     sentence-transformers 一加载就 OOM（2026-11-05 实测，
     Events 明确写着 Ran out of memory used over 512MB）。
-    16 篇小知识库，关键词 TF-IDF 足够分清库内/库外。
+    19 篇小知识库，关键词 TF-IDF 足够分清库内/库外。
     """
 
     def __init__(self, path):
