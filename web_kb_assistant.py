@@ -86,25 +86,89 @@ def respond(message, chatbot, state):
         return chatbot, state, ""
 
 
+THEME_CSS = """
+/* 页面：暖白底、窄栏居中 */
+body { background: #fafaf8; }
+.gradio-container { max-width: 840px !important; margin: 0 auto; background: transparent; font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif; }
+
+/* 头部 */
+.hero { display: flex; gap: 18px; align-items: center; padding: 34px 6px 20px; }
+.hero .monogram { width: 68px; height: 68px; min-width: 68px; border-radius: 50%; background: #0f766e; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 32px; font-weight: 600; }
+.hero h1 { font-size: 30px; line-height: 1.25; margin: 0 0 6px; color: #1c1917; letter-spacing: 2px; }
+.hero .tagline { font-size: 15px; color: #44403c; margin: 0 0 5px; line-height: 1.5; }
+.hero .tagline b { color: #0f766e; }
+.hero .intro { font-size: 13.5px; color: #78716c; margin: 0; line-height: 1.65; }
+
+/* 聊天卡片 */
+.chat-card { background: #ffffff; border: 1px solid #e7e5e4 !important; border-radius: 18px !important; box-shadow: 0 10px 32px rgba(28, 25, 23, 0.06); overflow: hidden; margin-bottom: 14px; }
+
+/* 提问框 */
+.ask-box { margin-bottom: 14px; }
+.ask-box textarea { border-radius: 14px !important; border-color: #d6d3d1 !important; background: #ffffff !important; }
+
+/* 气泡（命中即生效，不命中也不影响） */
+.message.user { background: #ccfbf1 !important; }
+.message.bot { background: #f5f5f4 !important; }
+
+/* 示例问题：胶囊按钮 */
+.examples-wrap { border: none !important; background: transparent !important; box-shadow: none !important; padding: 0 !important; }
+.examples-wrap button { border-radius: 999px !important; border: 1px solid #d6d3d1 !important; background: #ffffff !important; color: #44403c !important; }
+
+/* 页脚 */
+.footer { text-align: center; font-size: 12.5px; color: #a8a29e; padding: 4px 0 30px; line-height: 1.8; }
+.footer a { color: #0f766e; text-decoration: none; }
+
+/* 窄屏：头部纵向排 */
+@media (max-width: 640px) {
+  .hero { flex-direction: column; align-items: flex-start; gap: 12px; padding-top: 24px; }
+  .hero .monogram { width: 56px; height: 56px; min-width: 56px; font-size: 26px; }
+  .hero h1 { font-size: 26px; }
+}
+"""
+
+HERO_HTML = """
+<div class="hero">
+  <div class="monogram">秦</div>
+  <div>
+    <h1>秦龙</h1>
+    <p class="tagline"><b>Agent 工程师</b> · AI 应用方向 ｜ 上海康琼信息科技有限公司 销售经理</p>
+    <p class="intro">问它踩坑类问题，也可以问秦龙的经历、项目和技能；答案来自知识库，库里没有的会用大模型自己的知识回答并注明。</p>
+  </div>
+</div>
+"""
+
+THEME = gr.themes.Soft(primary_hue="teal", neutral_hue="stone", radius_size="lg")
+
+FOOTER_HTML = """
+<div class="footer">
+  内容来自秦龙的知识库 · 代码开源在 <a href="https://github.com/qinj620-dev/agent-learning" target="_blank">GitHub</a>
+</div>
+"""
+
 def build_demo():
     memory = load_memory()
-    with gr.Blocks(title="个人知识库助手") as demo:
-        gr.Markdown("# 个人知识库助手\n问它踩坑类问题，也可以问秦龙的经历、项目和技能；"
-                    "答案来自知识库，库里没有的会用大模型自己的知识回答并注明。")
-        chatbot = gr.Chatbot(label="问答",
+    with gr.Blocks(title="秦龙 · 个人知识库助手") as demo:
+        gr.HTML(HERO_HTML)
+        chatbot = gr.Chatbot(label=None, height=480,
+                             elem_classes="chat-card",
                              value=[{"role": m["role"], "content": m["content"]}
                                     for m in memory["history"]])
-        msg = gr.Textbox(label="你问", placeholder="比如：秦龙是谁？")
+        msg = gr.Textbox(label=None, placeholder="比如：秦龙是谁？",
+                         elem_classes="ask-box")
         state = gr.State({"summary": memory["summary"],
                           "history": list(memory["history"])})
         msg.submit(respond, [msg, chatbot, state], [chatbot, state, msg])
-        gr.Examples(
-            examples=[["秦龙是谁？"], ["秦龙有什么证书？"], ["知识库助手项目用了什么技术？"],
-                      ["秦龙的项目经历有哪些？"], ["秦龙的工作经历是怎样的？"], ["pip 安装报错 SSL 怎么解决？"]],
-            inputs=msg,
-            label="试试这样问",
-        )
+        with gr.Column(elem_classes="examples-wrap"):
+            gr.Examples(
+                examples=[["秦龙是谁？"], ["秦龙有什么证书？"], ["知识库助手项目用了什么技术？"],
+                          ["秦龙的项目经历有哪些？"], ["秦龙的工作经历是怎样的？"], ["pip 安装报错 SSL 怎么解决？"]],
+                inputs=msg,
+                label="试试这样问",
+            )
+        gr.HTML(FOOTER_HTML)
     return demo
+
+
 
 
 def launch_kwargs():
@@ -121,4 +185,4 @@ def launch_kwargs():
 
 if __name__ == "__main__":
     demo = build_demo()
-    demo.launch(**launch_kwargs())
+    demo.launch(css=THEME_CSS, theme=THEME, **launch_kwargs())
