@@ -8,8 +8,9 @@
   - share=True 还会给一个公开链接（gradio.live），别人不用装任何东西就能用；
     注意：公开链接是临时的，电脑关机或程序退出就没了；
     想长期公开，下一步可以部署到 Hugging Face Spaces。
-部署到 Render 等平台时：平台会设 PORT 环境变量，程序自动绑 0.0.0.0:$PORT
-且不开 share（平台自己给固定链接）；本地没 PORT 时保持上面的默认行为。
+部署到 Render 等平台时：平台会设 PORT 环境变量，走 FastAPI 包一层 +
+OG 中间件（服务端改分享标签，见下），uvicorn 跑在 0.0.0.0:$PORT 且不开
+share（平台自己给固定链接）；本地没 PORT 时保持上面的默认行为。
 
 记忆（2026-11-09 改为每会话独立）：每个访客的对话历史只存在自己
 浏览器的 gr.State 里，互不干扰、互不可见；关闭页面即消失，不再写
@@ -26,7 +27,9 @@
 失败的那轮不进记忆。
 """
 import os
+import re
 import threading
+from pathlib import Path
 
 import gradio as gr
 
@@ -231,6 +234,143 @@ def build_demo():
 
 
 
+# ---------------------------------------------------------------------------
+# 分享预览（2026-11-10 加）：微信等爬虫只读页面源码、不执行 JS，而 Gradio
+# 的 head 是运行时由 JS 注入的，所以 og 标签必须由服务端在返回首页 HTML
+# 时直接改好。做法：Render 上用 FastAPI 包一层 Gradio，加一个只改根页面
+# 的中间件，把 Gradio 模板里写死的默认分享标签（标题 Gradio、简介
+# "Click to try out the app!"、Gradio 配图）换成秦龙自己的。
+# 本地（无 PORT）仍走原来的 demo.launch，不受影响。
+# ---------------------------------------------------------------------------
+BASE_DIR = Path(__file__).resolve().parent
+OG_TITLE = "秦龙 · 个人知识库助手"
+OG_DESCRIPTION = "秦龙的个人知识库助手：问秦龙的经历、项目、技能和求职。售前 / 解决方案 / IT 产品销售 · AI 售前。"
+OG_IMAGE_URL = "https://agent-learning-l13m.onrender.com/og-image.png"
+SITE_URL = "https://agent-learning-l13m.onrender.com/"
+
+
+def _set_meta(html, prop, value, attr="property"):
+    """把 <meta ... property="prop" ... content="..." ...> 里的 content 换成 value。"""
+    pat = re.compile(
+        r'(<meta\s[^>]*?' + attr + r'="' + re.escape(prop) + r'"[^>]*?content=")[^"]*(")',
+        re.DOTALL,
+    )
+    return pat.sub(lambda m: m.group(1) + value + m.group(2), html)
+
+
+def rewrite_og_tags(html):
+    """统一改写首页 HTML 里的分享标签；Gradio 模板里有两套（默认 + 应用），都改。"""
+    for prop, value in [
+        ("og:title", OG_TITLE),
+        ("og:description", OG_DESCRIPTION),
+        ("og:image", OG_IMAGE_URL),
+        ("og:url", SITE_URL),
+        ("og:type", "website"),
+    ]:
+        html = _set_meta(html, prop, value)
+    for prop, value in [
+        ("twitter:card", "summary_large_image"),
+        ("twitter:title", OG_TITLE),
+        ("twitter:description", OG_DESCRIPTION),
+        ("twitter:image", OG_IMAGE_URL),
+    ]:
+        html = _set_meta(html, prop, value, attr="name")
+    # 去掉 Gradio 的 twitter:creator（@teamGradio），不是我们的账号
+    html = re.sub(r'<meta\s[^>]*?name="twitter:creator"[^>]*?/?>', "", html)
+    # 源码里本来没有 <title>（标题是 JS 后设的），爬虫看不到，补一个
+    head_extra = (
+        "<title>" + OG_TITLE + "</title>\n"
+        '<meta name="description" content="' + OG_DESCRIPTION + '">\n'
+        '<link rel="icon" type="image/png" href="/favicon.png">\n'
+    )
+    return html.replace("<head>", "<head>\n" + head_extra, 1)
+
+
+class OGRewriteMiddleware:
+    """纯 ASGI 中间件：只改 GET / 返回的 text/html，其余请求原样放过
+    （聊天走的 SSE/队列接口不在 / 上，不会被缓冲或改动；有压缩编码时也不改）。"""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or scope.get("method") != "GET" or scope.get("path") != "/":
+            await self.app(scope, receive, send)
+            return
+        state = {"status": None, "headers": [], "body": bytearray(), "passthrough": False}
+
+        async def send_wrapper(message):
+            if state["passthrough"]:
+                await send(message)
+                return
+            if message["type"] == "http.response.start":
+                state["status"] = message["status"]
+                state["headers"] = list(message.get("headers", []))
+                ctype = ""
+                encoding = ""
+                for k, v in state["headers"]:
+                    kl = k.lower()
+                    if kl == b"content-type":
+                        ctype = v.decode("latin-1", "ignore")
+                    elif kl == b"content-encoding":
+                        encoding = v.decode("latin-1", "ignore")
+                if "text/html" not in ctype or encoding:
+                    state["passthrough"] = True
+                    await send(message)
+                return
+            if message["type"] == "http.response.body":
+                state["body"].extend(message.get("body", b""))
+                if message.get("more_body"):
+                    return
+                raw = bytes(state["body"])
+                try:
+                    text = raw.decode("utf-8")
+                except UnicodeDecodeError:
+                    text = None
+                if text is None or "<head>" not in text:
+                    await send({"type": "http.response.start", "status": state["status"], "headers": state["headers"]})
+                    await send({"type": "http.response.body", "body": raw})
+                    return
+                new_body = rewrite_og_tags(text).encode("utf-8")
+                new_headers = [(k, v) for k, v in state["headers"] if k.lower() != b"content-length"]
+                new_headers.append((b"content-length", str(len(new_body)).encode()))
+                await send({"type": "http.response.start", "status": state["status"], "headers": new_headers})
+                await send({"type": "http.response.body", "body": new_body})
+                return
+            await send(message)
+
+        await self.app(scope, receive, send_wrapper)
+
+
+def serve_with_og(demo, port):
+    """Render 启动路径：FastAPI 包一层 Gradio，挂 OG 中间件，uvicorn 跑在 $PORT。"""
+    from fastapi import FastAPI
+    from fastapi.responses import Response
+    import uvicorn
+    from og_assets import OG_IMAGE_BYTES, FAVICON_BYTES
+
+    app = FastAPI()
+    app.add_middleware(OGRewriteMiddleware)
+
+    @app.get("/og-image.png")
+    async def og_image():
+        return Response(content=OG_IMAGE_BYTES, media_type="image/png")
+
+    @app.get("/favicon.png")
+    async def favicon_png():
+        return Response(content=FAVICON_BYTES, media_type="image/png")
+
+    @app.get("/favicon.ico")
+    async def favicon_ico():
+        return Response(content=FAVICON_BYTES, media_type="image/png")
+
+    app = gr.mount_gradio_app(
+        app, demo, path="/", server_port=port,
+        theme=THEME, css=THEME_CSS, head=ANALYTICS_HEAD,
+    )
+    uvicorn.run(app, host="0.0.0.0", port=port)
+
+
 def launch_kwargs():
     """按运行环境决定启动参数。
 
@@ -245,4 +385,9 @@ def launch_kwargs():
 
 if __name__ == "__main__":
     demo = build_demo()
-    demo.launch(css=THEME_CSS, theme=THEME, head=ANALYTICS_HEAD, **launch_kwargs())
+    port = os.environ.get("PORT")
+    if port:
+        # Render：FastAPI 包一层，加 OG 重写中间件，uvicorn 跑在 $PORT
+        serve_with_og(demo, int(port))
+    else:
+        demo.launch(css=THEME_CSS, theme=THEME, head=ANALYTICS_HEAD, **launch_kwargs())
