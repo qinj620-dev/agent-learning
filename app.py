@@ -198,8 +198,10 @@ FOOTER_HTML = """
 """
 
 # 51.la 网站统计（2026-11-10 接入）：追踪代码放进页面 <head>，访客量在 51.la 后台看
-ANALYTICS_HEAD = """<script charset="UTF-8" id="LA_COLLECT" src="//sdk.51.la/js-sdk-pro.min.js"></script>
-<script>LA.init({id:"3Rmfi9NkZK0QdAxq",ck:"3Rmfi9NkZK0QdAxq"})</script>"""
+# 注意：必须用单段 loader——Gradio 会把 head 里的 script 动态插进页面，
+# 原先两段式（先引 SDK 再 LA.init）会竞态：LA.init 常在 SDK 加载完之前就跑，
+# 报错 LA is not defined，统计永远发不出去。loader 等 SDK onload 后再 init。
+ANALYTICS_HEAD = """<script>(function(){var s=document.createElement('script');s.charset='UTF-8';s.src='//sdk.51.la/js-sdk-pro.min.js';s.onload=function(){LA.init({id:"3Rmfi9NkZK0QdAxq",ck:"3Rmfi9NkZK0QdAxq"})};document.head.appendChild(s);})();</script>"""
 
 def build_demo():
     with gr.Blocks(title="秦龙 · 个人知识库助手") as demo:
