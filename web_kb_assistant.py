@@ -181,13 +181,13 @@ HERO_HTML = """
   <div>
     <h1>秦龙</h1>
     <p class="tagline"><b>售前 / 解决方案 / IT 产品销售</b> · AI 售前 ｜ 上海康琼信息科技有限公司 销售经理</p>
-    <p class="intro">问它踩坑类问题，也可以问秦龙的经历、项目和技能。</p>
+    <p class="intro">问秦龙的经历、项目、技能和求职，也可以问它踩坑类问题。</p>
     <p class="note">答案来自知识库；库里没有的，会用大模型自己的知识回答并注明。</p>
   </div>
 </div>
 """
 
-GREETING = "你好，我是秦龙的知识库助手。问我秦龙的经历、项目、技能，或者开发踩坑问题——也可以直接点下面的示例问题试试。"
+GREETING = "你好，我是秦龙的知识库助手。问我秦龙的经历、项目、技能和求职，或者开发踩坑问题——也可以直接点下面的示例问题试试。"
 
 THEME = gr.themes.Soft(primary_hue="teal", neutral_hue="stone", radius_size="lg")
 
