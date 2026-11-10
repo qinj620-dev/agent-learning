@@ -116,7 +116,7 @@ def clear_chat():
 
 
 EXAMPLE_QUESTIONS = ["秦龙是谁？", "秦龙有什么证书？", "知识库助手项目用了什么技术？",
-                     "秦龙的项目经历有哪些？", "秦龙的工作经历是怎样的？", "pip 安装报错 SSL 怎么解决？"]
+                     "秦龙的求职意向是什么？", "秦龙的工作经历是怎样的？", "pip 安装报错 SSL 怎么解决？"]
 
 
 def make_ask_example(question):
