@@ -180,7 +180,7 @@ HERO_HTML = """
   <div class="monogram">秦</div>
   <div>
     <h1>秦龙</h1>
-    <p class="tagline"><b>Agent 工程师</b> · AI 应用方向 ｜ 上海康琼信息科技有限公司 销售经理</p>
+    <p class="tagline"><b>售前 / 解决方案 / IT 产品销售</b> · AI 售前 ｜ 上海康琼信息科技有限公司 销售经理</p>
     <p class="intro">问它踩坑类问题，也可以问秦龙的经历、项目和技能。</p>
     <p class="note">答案来自知识库；库里没有的，会用大模型自己的知识回答并注明。</p>
   </div>
