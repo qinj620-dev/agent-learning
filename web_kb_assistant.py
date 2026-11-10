@@ -101,7 +101,7 @@ def respond(message, chatbot, state):
         chatbot[-1] = {"role": "assistant", "content": EMPTY_TEXT}
         yield chatbot, state, message
         return
-    display = full + (f"\n\n---\n来源：{source}" if source else "")
+    display = full + (f"\n\n*来源：{source}*" if source else "")
     chatbot[-1] = {"role": "assistant", "content": display}
     history.append({"role": "user", "content": message})
     history.append({"role": "assistant", "content": full})

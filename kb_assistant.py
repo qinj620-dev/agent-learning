@@ -254,7 +254,8 @@ def build_answer_prompts(question, summary, history_text, retrieved):
                 "知识库里没有相关内容，以下是大模型自己的回答，仅供参考：\n",
                 "")
     context = "\n\n".join(c for c, _ in hits)
-    return ("你是知识库助手。只根据下面资料回答，答不上就说不知道，不要瞎编。",
+    return ("你是知识库助手。只根据下面资料回答，答不上就说不知道，不要瞎编。"
+            "回答要完整，把资料里的关键事实都提到，不要只回一句话。",
             f"对话摘要：{summary}\n最近对话：{history_text}\n"
             f"资料：\n{context}\n\n问题：{question}",
             "",
