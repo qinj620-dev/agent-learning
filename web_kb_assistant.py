@@ -197,6 +197,10 @@ FOOTER_HTML = """
 </div>
 """
 
+# 51.la 网站统计（2026-11-10 接入）：追踪代码放进页面 <head>，访客量在 51.la 后台看
+ANALYTICS_HEAD = """<script charset="UTF-8" id="LA_COLLECT" src="//sdk.51.la/js-sdk-pro.min.js"></script>
+<script>LA.init({id:"3Rmfi9NkZK0QdAxq",ck:"3Rmfi9NkZK0QdAxq"})</script>"""
+
 def build_demo():
     with gr.Blocks(title="秦龙 · 个人知识库助手") as demo:
         gr.HTML(HERO_HTML)
@@ -239,4 +243,4 @@ def launch_kwargs():
 
 if __name__ == "__main__":
     demo = build_demo()
-    demo.launch(css=THEME_CSS, theme=THEME, **launch_kwargs())
+    demo.launch(css=THEME_CSS, theme=THEME, head=ANALYTICS_HEAD, **launch_kwargs())
