@@ -78,8 +78,9 @@ def respond(message, chatbot, state):
                              for m in history[-4:])
     hits = kb.RETRIEVER.search(message)
     print(f"  [检索] top 分数：{[round(s, 3) for _, s in hits]}")
+    web_results = kb.fetch_web_if_missed(message, hits)
     system, user_prompt, prefix, source = kb.build_answer_prompts(
-        message, summary, history_text, hits)
+        message, summary, history_text, hits, web_results=web_results)
     chatbot = chatbot + [{"role": "user", "content": message},
                          {"role": "assistant", "content": prefix + THINKING}]
     yield chatbot, state, ""
