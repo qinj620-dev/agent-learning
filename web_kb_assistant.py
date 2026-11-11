@@ -132,7 +132,7 @@ def make_ask_example(question):
 
 THEME_CSS = """
 /* 页面：纯白底、窄栏居中 */
-body { background: #ffffff; }
+body { background: #ffffff !important; }
 .gradio-container { max-width: 840px !important; margin: 0 auto; background: transparent; font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif; }
 
 /* 头部 */
@@ -155,15 +155,17 @@ body { background: #ffffff; }
 /* 提问行 */
 .ask-row { margin-bottom: 14px; gap: 10px; align-items: stretch; }
 .send-btn { background: #0f766e !important; color: #ffffff !important; border: none !important; border-radius: 14px !important; min-width: 76px; font-weight: 600; transition: background 0.15s ease, transform 0.15s ease; }
-.send-btn:hover { background: #0d6b63 !important; transform: translateY(-1px); }
+.gradio-container .send-btn:hover { background: #0d6b63 !important; transform: translateY(-1px) !important; }
 .clear-btn { background: #ffffff !important; color: #57534e !important; border: 1px solid #d6d3d1 !important; border-radius: 14px !important; min-width: 76px; font-weight: 600; transition: background 0.15s ease, border-color 0.15s ease; }
-.clear-btn:hover { background: #f5f5f4 !important; border-color: #a8a29e !important; }
+.gradio-container .clear-btn:hover { background: #f5f5f4 !important; border-color: #a8a29e !important; }
 
 /* 提问框 */
 .ask-box { background: #ffffff !important; }
 .ask-box > div { background: #ffffff !important; }
 .ask-box textarea { border-radius: 14px !important; border-color: #d6d3d1 !important; background: #ffffff !important; }
-.ask-box textarea:focus { border-color: #0f766e !important; box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.15) !important; outline: none !important; }
+.ask-box:focus-within { border-color: #0f766e !important; box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.15) !important; }
+.ask-box:focus-within > div { border-color: #0f766e !important; }
+.ask-box textarea:focus { border-color: #0f766e !important; outline: none !important; }
 
 /* 气泡（命中即生效，不命中也不影响） */
 .message.user { background: #ccfbf1 !important; }
@@ -174,7 +176,7 @@ body { background: #ffffff; }
 .examples-label p { margin: 0 !important; }
 .examples-wrap { border: none !important; background: transparent !important; box-shadow: none !important; padding: 0 !important; display: flex !important; flex-direction: row !important; flex-wrap: wrap !important; gap: 8px !important; }
 .examples-wrap button { border-radius: 999px !important; border: 1px solid #d6d3d1 !important; background: #ffffff !important; color: #44403c !important; flex: 0 0 auto !important; transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease; }
-.examples-wrap button:hover { border-color: #0f766e !important; color: #0f766e !important; background: #f0fdfa !important; }
+.gradio-container .examples-wrap button:hover { border-color: #0f766e !important; color: #0f766e !important; background: #f0fdfa !important; }
 
 /* 页脚 */
 .footer { text-align: center; font-size: 12.5px; color: #a8a29e; padding: 4px 0 30px; line-height: 1.8; }
