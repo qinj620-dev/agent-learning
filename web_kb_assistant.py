@@ -132,8 +132,10 @@ def make_ask_example(question):
 
 THEME_CSS = """
 /* 页面：纯白底、窄栏居中 */
-body { background: #ffffff !important; }
-.gradio-container { max-width: 840px !important; margin: 0 auto; background: transparent; font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif; }
+/* 底色：主题变量 --body-background-fill 指向 stone-50，从变量和元素两头盖掉 */
+:root { --body-background-fill: #ffffff !important; }
+html, body, #root, .gradio-container { background: #ffffff !important; }
+.gradio-container { max-width: 840px !important; margin: 0 auto; font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif; }
 
 /* 头部 */
 .hero { display: flex; gap: 18px; align-items: center; padding: 34px 6px 20px; }
@@ -164,8 +166,8 @@ body { background: #ffffff !important; }
 .ask-box > div { background: #ffffff !important; }
 .ask-box textarea { border-radius: 14px !important; border-color: #d6d3d1 !important; background: #ffffff !important; }
 .ask-box:focus-within { border-color: #0f766e !important; box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.15) !important; }
-.ask-box:focus-within > div { border-color: #0f766e !important; }
-.ask-box textarea:focus { border-color: #0f766e !important; outline: none !important; }
+.ask-box input:focus { box-shadow: 0 0 0 2px #0f766e !important; outline: none !important; }
+.ask-box .input-container:focus-within { box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.15) !important; }
 
 /* 气泡（命中即生效，不命中也不影响） */
 .message.user { background: #ccfbf1 !important; }
