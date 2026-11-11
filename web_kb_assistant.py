@@ -138,11 +138,16 @@ body { background: #fafaf8; }
 /* 头部 */
 .hero { display: flex; gap: 18px; align-items: center; padding: 34px 6px 20px; }
 .hero .monogram { width: 68px; height: 68px; min-width: 68px; border-radius: 50%; background: #0f766e; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 32px; font-weight: 600; }
-.hero h1 { font-size: 30px; line-height: 1.25; margin: 0 0 6px; color: #1c1917; letter-spacing: 2px; }
+.hero h1 { font-size: 38px; line-height: 1.2; margin: 0 0 6px; color: #1c1917; letter-spacing: 0.5px; }
 .hero .tagline { font-size: 15px; color: #44403c; margin: 0 0 5px; line-height: 1.5; }
 .hero .tagline b { color: #0f766e; }
-.hero .intro { font-size: 13.5px; color: #78716c; margin: 0; line-height: 1.65; }
 .hero .note { font-size: 12.5px; color: #a8a29e; margin: 3px 0 0; line-height: 1.6; }
+
+/* 信任条：数字徽章 */
+.trust-bar { display: flex; flex-wrap: wrap; gap: 8px 24px; padding: 0 6px 18px; font-size: 13px; color: #78716c; }
+.trust-bar b { color: #0f766e; font-size: 15px; margin-right: 3px; }
+.trust-bar a { color: #78716c; text-decoration: none; }
+.trust-bar a:hover { color: #0f766e; }
 
 /* 聊天卡片 */
 .chat-card { background: #ffffff; border: 1px solid #e7e5e4 !important; border-radius: 18px !important; box-shadow: 0 10px 32px rgba(28, 25, 23, 0.06); overflow: hidden; margin-bottom: 14px; }
@@ -183,11 +188,19 @@ HERO_HTML = """
 <div class="hero">
   <div class="monogram">秦</div>
   <div>
-    <h1>秦龙</h1>
+    <h1>问秦龙的经历、项目和求职</h1>
     <p class="tagline"><b>售前 / 解决方案 / IT 产品销售</b> · AI 售前 ｜ 上海康琼信息科技有限公司 销售经理</p>
-    <p class="intro">问秦龙的经历、项目、技能和求职，也可以问它踩坑类问题。</p>
-    <p class="note">答案来自知识库；库里没有的，会用大模型自己的知识回答并注明。</p>
+    <p class="note">答案优先来自知识库；库里没有的，会联网搜索或用大模型自己的知识回答，并注明来源。</p>
   </div>
+</div>
+"""
+
+TRUST_HTML = """
+<div class="trust-bar">
+  <span><b>100万+</b>烽火光纤光缆累计销售</span>
+  <span><b>13</b>个 Agent 学习任务已完成</span>
+  <span><b>20</b>篇知识库文档</span>
+  <a href="https://github.com/qinj620-dev/agent-learning" target="_blank"><b>GitHub</b>开源项目</a>
 </div>
 """
 
@@ -210,7 +223,8 @@ ANALYTICS_HEAD = """<script>(function(){var s=document.createElement('script');s
 def build_demo():
     with gr.Blocks(title="秦龙 · 个人知识库助手") as demo:
         gr.HTML(HERO_HTML)
-        chatbot = gr.Chatbot(show_label=False, height=480,
+        gr.HTML(TRUST_HTML)
+        chatbot = gr.Chatbot(show_label=False, height="min(70vh, 640px)",
                              elem_classes="chat-card",
                              value=[{"role": "assistant", "content": GREETING}])
         with gr.Row(elem_classes="ask-row"):
