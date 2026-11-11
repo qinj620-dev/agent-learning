@@ -166,7 +166,7 @@ html, body, #root, .gradio-container { background: #ffffff !important; }
 .ask-box > div { background: #ffffff !important; }
 .ask-box textarea { border-radius: 14px !important; border-color: #d6d3d1 !important; background: #ffffff !important; }
 .ask-box:focus-within { border-color: #0f766e !important; box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.15) !important; }
-.ask-box input:focus { box-shadow: 0 0 0 2px #0f766e !important; outline: none !important; }
+.gradio-container .ask-box input:focus { border: 2px solid #0f766e !important; outline: none !important; }
 .ask-box .input-container:focus-within { box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.15) !important; }
 
 /* 气泡（命中即生效，不命中也不影响） */
