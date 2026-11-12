@@ -164,7 +164,7 @@ html, body, #root, .gradio-container { background: #ffffff !important; }
 /* 提问框 */
 .ask-box { background: #ffffff !important; }
 .ask-box > div { background: #ffffff !important; }
-.ask-box textarea { border-radius: 14px !important; border-color: #d6d3d1 !important; background: #ffffff !important; }
+.ask-box textarea:not(:focus) { border-radius: 14px !important; border-color: #d6d3d1 !important; background: #ffffff !important; }
 .ask-box:focus-within { border-color: #0f766e !important; box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.15) !important; }
 .gradio-container .ask-box textarea:focus { border: 2px solid #0f766e !important; outline: none !important; }
 .ask-box .input-container:focus-within { box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.15) !important; }
