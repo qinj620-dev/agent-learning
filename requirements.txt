@@ -2,3 +2,4 @@ gradio
 langgraph
 requests
 numpy
+libsql-client

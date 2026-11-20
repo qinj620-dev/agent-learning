@@ -21,7 +21,11 @@ Render 免费版休眠/重启会丢运行时文件，线上只在实例醒着时
 联网搜索（2026-11-11 加）：库外问题先调 Tavily 搜一圈，搜到按搜索结果答
 并注明来源网址，搜不到或没配 TAVILY_API_KEY 时回落到大模型知识；没 key 不
 报错、不影响原有两档。见 web_search.py。
+云数据库（2026-11-20 加）：MemoryStore 两档存储，设了 TURSO_DATABASE_URL +
+TURSO_AUTH_TOKEN 走 Turso 云数据库（libSQL），Render 重启也不丢记忆；没设
+走本地 SQLite，和以前一样。
 """
+import atexit
 import json
 import math
 import os
@@ -35,6 +39,8 @@ from typing import TypedDict
 from langgraph.graph import StateGraph, START, END
 
 DEEPSEEK_KEY = os.getenv("DEEPSEEK_API_KEY")
+TURSO_URL = os.getenv("TURSO_DATABASE_URL", "")
+TURSO_TOKEN = os.getenv("TURSO_AUTH_TOKEN", "")
 MODEL = "deepseek-chat"
 API = "https://api.deepseek.com/chat/completions"
 KB_PATH = "knowledge_base.md"
@@ -46,51 +52,72 @@ DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "memory.db")
 
 
 class MemoryStore:
-    """长期记忆：对话历史 + 摘要，存进代码旁边的 SQLite（memory.db）。
+    """长期记忆：对话历史 + 摘要。
 
-    为什么用 SQLite：标准库自带，不用装任何东西；一个文件就是全部记忆，
-    复制走就能带走；读写毫秒级，几十条对话才几十 KB。
-
-    用法：启动时 load() 恢复 (summary, history)，每轮问答结束 save() 写回。
-    本地跑：memory.db 一直在，记忆永久有效。
-    Render 免费版：实例休眠/重启会丢运行时文件（2026-11-05 实测：构建时
-    没进镜像的模型文件就是这么丢的），所以线上记忆只在实例醒着时有效，
-    睡一觉就没了——这是免费档的限制，不是 bug；要永久在线记忆得用云数据库。
+    两档存储（2026-11-20 加）：
+    - 设了 TURSO_DATABASE_URL + TURSO_AUTH_TOKEN：走 Turso 云数据库（libSQL，
+      和 SQLite 同一个方言），Render 重启/休眠也不丢记忆。
+    - 没设：走本地 SQLite（memory.db），和以前一样。
+    两边表结构、SQL 完全一样，只是连接方式不同，所以只抽象出一个 _run()
+    统一执行，load/save 不用分两套写。
     """
 
     def __init__(self, path=DB_PATH):
         self.path = path
         self._lock = threading.Lock()
         self._broken = False
+        self._remote = bool(TURSO_URL and TURSO_TOKEN)
+        self._client = None
         try:
-            with self._connect() as conn:
-                conn.execute(
-                    "CREATE TABLE IF NOT EXISTS meta"
-                    " (key TEXT PRIMARY KEY, value TEXT)")
-                conn.execute(
-                    "CREATE TABLE IF NOT EXISTS messages"
-                    " (id INTEGER PRIMARY KEY AUTOINCREMENT,"
-                    "  role TEXT NOT NULL, content TEXT NOT NULL)")
-        except sqlite3.Error as e:
+            if self._remote:
+                import libsql_client
+                self._client = libsql_client.create_client_sync(
+                    url=TURSO_URL, auth_token=TURSO_TOKEN)
+            self._run("CREATE TABLE IF NOT EXISTS meta"
+                      " (key TEXT PRIMARY KEY, value TEXT)")
+            self._run("CREATE TABLE IF NOT EXISTS messages"
+                      " (id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                      "  role TEXT NOT NULL, content TEXT NOT NULL)")
+        except Exception as e:
             self._broken = True
             print(f"  [记忆] 数据库打不开（{e}），本次只用内存记忆")
 
     def _connect(self):
         return sqlite3.connect(self.path, timeout=10)
 
+    def _run(self, sql, params=None, fetch=False):
+        """在当前后端上执行一条 SQL；fetch=True 时返回行列表（每行是 tuple）。"""
+        if self._remote:
+            rs = self._client.execute(sql, list(params) if params else [])
+            return [tuple(r) for r in rs.rows] if fetch else None
+        with self._connect() as conn:
+            cur = conn.execute(sql, params or ())
+            return cur.fetchall() if fetch else None
+
+    def close(self):
+        """关闭远程连接（本地 SQLite 不用关）。
+        libsql 同步客户端背后有个事件循环线程，不关它进程退不出。"""
+        if self._client is not None:
+            try:
+                self._client.close()
+            except Exception:
+                pass
+            self._client = None
+
     def load(self):
         """读库恢复：返回 (summary, history)，库不存在时返回 ("", [])。"""
         if self._broken:
             return "", []
         try:
-            with self._lock, self._connect() as conn:
-                row = conn.execute(
-                    "SELECT value FROM meta WHERE key='summary'").fetchone()
-                summary = row[0] if row else ""
-                history = [{"role": r, "content": c} for r, c in conn.execute(
-                    "SELECT role, content FROM messages ORDER BY id")]
+            with self._lock:
+                rows = self._run(
+                    "SELECT value FROM meta WHERE key='summary'", fetch=True)
+                summary = rows[0][0] if rows else ""
+                history = [{"role": r, "content": c} for r, c in self._run(
+                    "SELECT role, content FROM messages ORDER BY id",
+                    fetch=True)]
             return summary, history
-        except sqlite3.Error as e:
+        except Exception as e:
             print(f"  [记忆] 读库失败（{e}），按空记忆继续")
             return "", []
 
@@ -100,16 +127,17 @@ class MemoryStore:
         if self._broken:
             return
         try:
-            with self._lock, self._connect() as conn:
-                conn.execute("DELETE FROM messages")
-                conn.executemany(
-                    "INSERT INTO messages (role, content) VALUES (?, ?)",
-                    [(m["role"], m["content"]) for m in history])
-                conn.execute(
+            with self._lock:
+                self._run("DELETE FROM messages")
+                for m in history:
+                    self._run(
+                        "INSERT INTO messages (role, content) VALUES (?, ?)",
+                        (m["role"], m["content"]))
+                self._run(
                     "INSERT OR REPLACE INTO meta (key, value)"
                     " VALUES ('summary', ?)",
                     (summary,))
-        except sqlite3.Error as e:
+        except Exception as e:
             print(f"  [记忆] 写库失败（{e}），本轮记忆没存上")
 
 
@@ -318,6 +346,7 @@ def main():
     RETRIEVER = Retriever(KB_PATH)
     app = build_graph()
     store = MemoryStore()
+    atexit.register(store.close)  # 退出时自动关远程连接
     summary, history = store.load()
     if history or summary:
         print(f"  [记忆] 已恢复上次对话：{len(history)} 条"
