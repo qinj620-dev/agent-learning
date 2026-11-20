@@ -25,7 +25,7 @@ Render 免费版休眠/重启会丢运行时文件，线上只在实例醒着时
 TURSO_AUTH_TOKEN 走 Turso 云数据库（libSQL），Render 重启也不丢记忆；没设
 走本地 SQLite，和以前一样。
 """
-import atexit
+import sys
 import json
 import math
 import os
@@ -346,29 +346,37 @@ def main():
     RETRIEVER = Retriever(KB_PATH)
     app = build_graph()
     store = MemoryStore()
-    atexit.register(store.close)  # 退出时自动关远程连接
     summary, history = store.load()
     if history or summary:
         print(f"  [记忆] 已恢复上次对话：{len(history)} 条"
               + (f"，摘要：{summary[:60]}..." if summary else ""))
-    while True:
-        q = input("你问（回车退出）：").strip()
-        if not q:
-            break
-        # 记忆：超 10 条就把旧的摘要压缩，只留最近 4 条
-        if len(history) > 10:
-            summary = summarize_old(history[:-4])
-            history = history[-4:]
-            print(f"  [记忆] 已压缩旧对话，摘要：{summary[:60]}...")
-        history_text = "\n".join(f"{m['role']}: {m['content']}"
-                                 for m in history[-4:])
-        result = app.invoke({"question": q, "summary": summary,
-                             "history_text": history_text,
-                             "retrieved": [], "answer": ""})
-        print("\n回答：", result["answer"], "\n")
-        history.append({"role": "user", "content": q})
-        history.append({"role": "assistant", "content": result["answer"]})
-        store.save(summary, history)  # 每轮结束写库，下次启动接着聊
+    try:
+        while True:
+            q = input("你问（回车退出）：").strip()
+            if not q:
+                break
+            # 记忆：超 10 条就把旧的摘要压缩，只留最近 4 条
+            if len(history) > 10:
+                summary = summarize_old(history[:-4])
+                history = history[-4:]
+                print(f"  [记忆] 已压缩旧对话，摘要：{summary[:60]}...")
+            history_text = "\n".join(f"{m['role']}: {m['content']}"
+                                     for m in history[-4:])
+            result = app.invoke({"question": q, "summary": summary,
+                                 "history_text": history_text,
+                                 "retrieved": [], "answer": ""})
+            print("\n回答：", result["answer"], "\n")
+            history.append({"role": "user", "content": q})
+            history.append({"role": "assistant", "content": result["answer"]})
+            store.save(summary, history)  # 每轮结束写库，下次启动接着聊
+    except KeyboardInterrupt:
+        print("\n再见！")
+    # 退出：对话已逐轮写库，这里直接强制结束进程。
+    # 原因：libsql 同步客户端起了一个后台线程，正常退出时它有时关不掉，
+    # 会拖住进程不退出（表现为按回车没反应）。os._exit() 不走 atexit、
+    # 不等后台线程，直接结束，数据已保存、不受影响。
+    sys.stdout.flush()
+    os._exit(0)
 
 
 if __name__ == "__main__":
